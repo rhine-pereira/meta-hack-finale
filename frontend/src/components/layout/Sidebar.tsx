@@ -15,7 +15,8 @@ import {
   HelpCircle,
   AlertTriangle,
   History,
-  Activity
+  Activity,
+  Skull
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +76,11 @@ export const Sidebar = () => {
         <div className="mt-6 px-6 py-2 text-[10px] text-text-muted uppercase tracking-widest font-bold border-t border-white/5 pt-6">
           Operations
         </div>
+        <a href="/postmortem" className="text-signal-red py-3 px-6 flex items-center gap-3 opacity-80 hover:bg-signal-red/5 hover:opacity-100 transition-all group">
+          <Skull size={16} />
+          <span className="flex-1">Resurrection</span>
+          <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-signal-red/10 border border-signal-red/20 text-signal-red opacity-0 group-hover:opacity-100 transition-opacity">NEW</span>
+        </a>
         <a href="#" className="text-text-secondary py-3 px-6 flex items-center gap-3 opacity-60 hover:bg-white/5 hover:opacity-100 transition-all">
           <Activity size={16} /> Diagnostics
         </a>
