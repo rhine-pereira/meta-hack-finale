@@ -45,22 +45,13 @@ args, _ = parser.parse_known_args()
 
 # ── OpenEnv Client (MCP) ──────────────────────────────────────────────────────
 from client import GenesisEnv
-import openenv.core.mcp_client
-from mcp.client.sse import sse_client
-from mcp.client.session import ClientSession
-from contextlib import AsyncExitStack
 
-# OpenEnv's MCPToolClient defaults to WebSockets, but FastMCP uses SSE.
-# We patch it to use SSE for local training compatibility.
-async def _patched_connect(self):
-    self._exit_stack = AsyncExitStack()
-    # FastMCP SSE endpoint is at /mcp
-    endpoint = self._production_mcp_url.rstrip("/") + "/mcp"
-    self._read, self._write = await self._exit_stack.enter_async_context(sse_client(endpoint))
-    self._session = await self._exit_stack.enter_async_context(ClientSession(self._read, self._write))
-    await self._session.initialize()
 
-openenv.core.mcp_client.MCPClientBase.connect = _patched_connect
+def _create_env_client(base_url: str = "http://127.0.0.1:7860"):
+    """Create a sync OpenEnv MCP client in production mode (/mcp HTTP JSON-RPC)."""
+    env = GenesisEnv(base_url=base_url).sync()
+    env.async_client.use_production_mode = True
+    return env
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -143,9 +134,11 @@ def run_episode(role: str, action_text: str, seed: int | None = None,
     """
     episode_id = str(uuid.uuid4())
     eff_difficulty = difficulty_override if difficulty_override else DIFFICULTY
-    
-    # Use the OpenEnv client to interact with the environment
-    with GenesisEnv(base_url="http://127.0.0.1:7860").sync() as env:
+
+    # Use the OpenEnv client to interact with the environment.
+    # Production mode calls FastMCP /mcp directly and avoids /ws assumptions.
+    env = _create_env_client()
+    try:
         # 1. Reset the environment
         env.call_tool("reset", episode_id=episode_id, difficulty=eff_difficulty, seed=seed or 42)
         
@@ -178,7 +171,10 @@ def run_episode(role: str, action_text: str, seed: int | None = None,
         
         # 4. Get final reward and weaknesses for self-play
         reward_data = env.call_tool("get_reward", episode_id=episode_id)
-        
+
+    finally:
+        env.close()
+
     return reward_data, reward_data.get("weaknesses", [])
 
 
@@ -512,12 +508,12 @@ def train():
 
     # ── Eval summary ──────────────────────────────────────────────
     print("\nRunning final eval episode...")
-    test_score = run_episode(
+    test_reward_data, _ = run_episode(
         role="ceo",
         action_text='{"tool": "make_decision", "args": {"decision_type": "strategic", "decision": "Focus on PMF", "reasoning": "Early stage"}}',
         seed=999,
     )
-    print(f"Baseline reward (random CEO action): {test_score.total:.4f}")
+    print(f"Baseline reward (random CEO action): {float(test_reward_data.get('reward', 0.0)):.4f}")
 
 
 # ── Server Lifecycle ──────────────────────────────────────────────────────────
@@ -540,11 +536,13 @@ def start_openenv_server():
     max_retries = 15
     for i in range(max_retries):
         try:
-            # We check the root or some endpoint to confirm it's up
-            requests.get("http://127.0.0.1:7860/")
-            print("Server ready.")
-            return proc
-        except requests.exceptions.ConnectionError:
+            # FastMCP is considered ready when /mcp responds.
+            # GET usually returns 406 (missing Accept: text/event-stream), which is expected.
+            response = requests.get("http://127.0.0.1:7860/mcp", timeout=2)
+            if response.status_code in (200, 405, 406):
+                print("Server ready.")
+                return proc
+        except requests.exceptions.RequestException:
             if i % 3 == 0:
                 print(f"Waiting for server... ({i}/{max_retries})")
             time.sleep(1)

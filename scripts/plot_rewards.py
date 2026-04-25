@@ -1,60 +1,103 @@
-import pickle
-import matplotlib.pyplot as plt
-import sys
+import argparse
+import json
 import os
+import pickle
+import sys
 
-# Add project root to sys.path to import server modules
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import matplotlib.pyplot as plt
 
-# Import WorldState so pickle can unfreeze it
+# Add project root to sys.path to import local server modules for pickle deserialization.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 try:
-    from server.world_state import WorldState
+    from server.world_state import WorldState  # noqa: F401
 except ImportError:
-    print("Warning: Could not import server.world_state. Ensure the script is run from the project root or sys.path is correct.")
+    print("Warning: Could not import server.world_state. Run from project root.")
 
-def plot_rewards(sessions_file="sessions.pkl"):
+
+def _moving_average(values, window=7):
+    if len(values) < window:
+        return values
+    out = []
+    running = 0.0
+    for i, value in enumerate(values):
+        running += value
+        if i >= window:
+            running -= values[i - window]
+        if i >= window - 1:
+            out.append(running / window)
+    return out
+
+
+def plot_rewards(sessions_file="sessions.pkl", output_dir="outputs/evals"):
     if not os.path.exists(sessions_file):
-        print(f"No sessions file found at {sessions_file}")
-        return
+        raise FileNotFoundError(f"No sessions file found at {sessions_file}")
 
     with open(sessions_file, "rb") as f:
-        try:
-            sessions, _ = pickle.load(f)
-        except Exception as e:
-            print(f"Error loading sessions: {e}")
-            return
+        sessions, _ = pickle.load(f)
 
     if not sessions:
-        print("No sessions found in file.")
-        return
+        raise ValueError("No sessions found in sessions.pkl")
+
+    os.makedirs(output_dir, exist_ok=True)
 
     plt.figure(figsize=(12, 7))
-    
-    plotted = False
+
+    final_rewards = []
+    plotted = 0
     for episode_id, state in sessions.items():
-        if not hasattr(state, 'reward_history') or not state.reward_history:
+        if not hasattr(state, "reward_history") or not state.reward_history:
             continue
-        
-        days = list(range(len(state.reward_history)))
-        label = f"Ep {episode_id[:6]} (Day {state.day})"
-        plt.plot(days, state.reward_history, label=label, alpha=0.8, linewidth=2)
-        plotted = True
 
-    if not plotted:
-        print("No reward history found in any session.")
-        return
+        rewards = [float(x) for x in state.reward_history]
+        days = list(range(1, len(rewards) + 1))
+        label = f"Ep {episode_id[:6]}"
 
-    plt.title("🧬 GENESIS Training Progress — Reward Curves", fontsize=14, fontweight='bold')
+        plt.plot(days, rewards, alpha=0.25, linewidth=1)
+
+        ma = _moving_average(rewards, window=7)
+        if ma:
+            ma_days = list(range(max(1, len(rewards) - len(ma) + 1), len(rewards) + 1))
+            plt.plot(ma_days, ma, label=label, linewidth=2)
+
+        final_rewards.append(rewards[-1])
+        plotted += 1
+
+    if plotted == 0:
+        raise ValueError("No reward_history found in any session")
+
+    plt.title("GENESIS Training Progress - Reward Curves", fontsize=14, fontweight="bold")
     plt.xlabel("Simulated Day", fontsize=12)
-    plt.ylabel("Rubric Reward (0-1)", fontsize=12)
+    plt.ylabel("Reward (0 to 1)", fontsize=12)
     plt.ylim(0, 1.05)
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
-    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(loc="lower right", fontsize="small")
     plt.tight_layout()
-    
-    output_path = "reward_curves.png"
-    plt.savefig(output_path, dpi=300)
-    print(f"✅ Successfully saved reward curves to {output_path}")
+
+    curve_path = os.path.join(output_dir, "reward_curves.png")
+    plt.savefig(curve_path, dpi=200)
+    plt.close()
+
+    summary = {
+        "num_sessions_with_history": plotted,
+        "avg_final_reward": round(sum(final_rewards) / len(final_rewards), 4),
+        "best_final_reward": round(max(final_rewards), 4),
+        "worst_final_reward": round(min(final_rewards), 4),
+    }
+    summary_path = os.path.join(output_dir, "reward_summary.json")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"Saved: {curve_path}")
+    print(f"Saved: {summary_path}")
+    print(json.dumps(summary, indent=2))
+
 
 if __name__ == "__main__":
-    plot_rewards()
+    parser = argparse.ArgumentParser(description="Plot GENESIS reward curves from sessions.pkl")
+    parser.add_argument("--sessions", default="sessions.pkl", help="Path to sessions.pkl")
+    parser.add_argument("--out", default="outputs/evals", help="Directory to write artifacts")
+    args = parser.parse_args()
+    plot_rewards(sessions_file=args.sessions, output_dir=args.out)
