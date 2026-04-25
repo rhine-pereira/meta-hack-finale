@@ -223,6 +223,7 @@ def initialize_world(
             target_role=template["target_role"],
             description=template["description"],
             severity=template["severity"],
+            injected_day=0,
         ))
 
     # ── Seed CompanyBrain with basics ─────────────────────────────────

@@ -46,6 +46,14 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
             state.product_maturity = min(1.0, state.product_maturity + 0.03)
             state.tech_debt = min(1.0, state.tech_debt + feat.tech_debt_added)
             events.append(f"🚀 Feature '{feat.name}' shipped!")
+            
+            # Consequence tracking: Link ship to start
+            start_ev = next((e for e in state.event_history if e.get("type") == "feature_start" and e.get("feat_name") == feat.name), None)
+            ship_ev = {"id": str(uuid.uuid4()), "type": "feature_ship", "day": state.day, "desc": f"Shipped {feat.name}"}
+            state.event_history.append(ship_ev)
+            if start_ev:
+                state.causal_links.append({"cause_id": start_ev["id"], "effect_id": ship_ev["id"], "delay": state.day - start_ev["day"]})
+
             # Boost customer satisfaction for features they wanted
             for c in state.customers:
                 if c.wants_feature and feat.name.lower() in c.wants_feature.lower():
@@ -60,6 +68,15 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
         state.uptime = max(0.85, state.uptime - 0.001)
         if rng.random() < 0.02:
             events.append("🔥 Production incident! High tech debt caused an outage.")
+            
+            # Consequence tracking: Link to recent high-debt deploy
+            recent_deploys = [e for e in state.event_history if e.get("type") == "deploy" and e.get("tech_debt", 0) > 0.5]
+            outage_ev = {"id": str(uuid.uuid4()), "type": "tech_debt_outage", "day": state.day, "desc": "Outage caused by tech debt"}
+            state.event_history.append(outage_ev)
+            if recent_deploys:
+                cause = recent_deploys[-1]
+                state.causal_links.append({"cause_id": cause["id"], "effect_id": outage_ev["id"], "delay": state.day - cause["day"]})
+            
             for c in state.customers:
                 c.satisfaction = max(0.0, c.satisfaction - 0.05)
                 c.churn_risk = min(1.0, c.churn_risk + 0.08)
@@ -140,12 +157,22 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
                 target_role=template["target_role"],
                 description=template["description"],
                 severity=template["severity"],
+                injected_day=state.day,
             )
             state.personal_crises.append(new_crisis)
             events.append(
                 f"🆘 Personal crisis for {template['target_role'].value.upper()}: "
                 f"{template['description'][:80]}..."
             )
+
+    # ── 6b. Mark stale unresolved crises as ignored ──────────────────
+    CRISIS_EXPIRY_DAYS = 14  # If unresolved after 14 days → ignored
+    for crisis in state.personal_crises:
+        if not crisis.resolved and not crisis.ignored:
+            age = state.day - crisis.injected_day
+            if age >= CRISIS_EXPIRY_DAYS:
+                crisis.ignored = True
+                state.crises_ignored += 1
 
     # ── 7. Milestone checkpoints ──────────────────────────────────────
     milestones = {
@@ -195,6 +222,57 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
         for inv in state.investors:
             inv.sentiment = max(0.0, inv.sentiment - 0.15)
 
+    # ── 10. Valuation drift (monthly) ─────────────────────────────────
+    if state.day % 30 == 0 and state.arr() > 0:
+        # Advanced valuation: ARR multiple + team/product premiums - debt penalties
+        base_multiple = 7.0
+        # Premiums
+        if state.team_avg_morale() > 0.75: base_multiple += 2.5
+        if state.product_maturity > 0.5: base_multiple += 1.5
+        if state.difficulty.value >= 4: base_multiple += 1.0  # survivor premium
+        # Penalties
+        if state.tech_debt > 0.5: base_multiple -= 2.0
+        if state.uptime < 0.98: base_multiple -= 1.0
+        
+        implied = state.arr() * max(3.0, base_multiple) + state.product_maturity * 2_500_000
+        state.valuation = max(state.valuation, implied)
+
     mm.persist_weaknesses()
 
+    # ── 11. Check Series A Closing ───────────────────────────────────
+    series_a_event = _check_series_a(state)
+    if series_a_event:
+        events.append(series_a_event)
+
     return events
+
+
+def _check_series_a(state: WorldState) -> str | None:
+    """Evaluate whether Series A conditions are met. Returns event string or None."""
+    if state.series_a_closed:
+        return None
+    if state.day < state.max_days // 3:
+        return None
+
+    term_sheet_investors = [i for i in state.investors if i.has_term_sheet]
+    if not term_sheet_investors:
+        return None
+
+    if state.arr() < 500_000:
+        return None
+
+    if state.runway_days() < 30:
+        return None
+
+    # Pick the investor with the best term sheet
+    best = max(term_sheet_investors, key=lambda i: i.term_sheet_valuation or 0)
+
+    state.series_a_closed = True
+    state.valuation = best.term_sheet_valuation or state.valuation * 3
+    state.cash += best.check_size_min  # inject the funding round cash
+
+    return (
+        f"🎉 SERIES A CLOSED! {best.name} invested at "
+        f"${state.valuation:,.0f} valuation. "
+        f"${best.check_size_min:,.0f} added to treasury."
+    )

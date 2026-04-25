@@ -13,8 +13,35 @@ from .world_state import WorldState, DifficultyLevel, AgentRole
 from .world_init import initialize_world
 from .event_engine import tick_day
 from .reward_engine import compute_reward
+from .market_maker import MarketMaker
 
 # ── Global Registry ──────────────────────────────────────────────────────────
+from fastapi import FastAPI, WebSocket, Request
+from fastapi.middleware.cors import CORSMiddleware
+from mcp.server.websocket import websocket_server
+
+# Create the FastMCP instance
+mcp = FastMCP("genesis")
+
+# Get the underlying FastAPI app from FastMCP
+app = mcp.http_app()
+
+# Add CORS for local training compliance
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+from starlette.responses import JSONResponse
+
+async def health(request: Request):
+    return JSONResponse({"status": "ok"})
+
+app.router.add_route("/health", health, methods=["GET"])
+
 # Keyed by episode_id (session identifier)
 SESSIONS_FILE = "sessions.pkl"
 SESSIONS: Dict[str, WorldState] = {}
@@ -40,8 +67,6 @@ def load_sessions():
 # Load on startup
 load_sessions()
 
-# ── MCP App ──────────────────────────────────────────────────────────────────
-mcp = FastMCP("genesis")
 
 def _get_state(episode_id: str) -> WorldState:
     """Helper to retrieve state or raise error."""
@@ -266,6 +291,14 @@ def build_feature(episode_id: str, agent_role: str, name: str, complexity: str, 
     )
     
     state.pending_features.append(new_feat)
+    
+    # Log event for consequence tracking
+    event_id = str(uuid.uuid4())
+    state.event_history.append({
+        "id": event_id, "type": "feature_start", "day": state.day, 
+        "desc": f"Started building {name} ({complexity})", "feat_name": name
+    })
+    
     save_sessions()
     
     return {
@@ -405,7 +438,12 @@ def hire_candidate(episode_id: str, agent_role: str, candidate_id: str, role: st
     state.candidate_pool.remove(candidate)
     
     # Update burn rate (approximate daily cost)
-    state.burn_rate_daily += salary / 365
+    # Log event for consequence tracking
+    event_id = str(uuid.uuid4())
+    state.event_history.append({
+        "id": event_id, "type": "hire", "day": state.day, 
+        "desc": f"Hired {new_emp.name} as {role}", "entity_id": new_emp.id, "is_toxic": new_emp.is_toxic
+    })
     
     save_sessions()
     
@@ -442,7 +480,12 @@ def fire_employee(episode_id: str, agent_role: str, employee_id: str, severance:
     for other in state.employees:
         other.morale = max(0.0, other.morale - 0.07)
     
-    knowledge_loss = "HIGH" if emp.skill_level > 0.7 else "LOW"
+    # Log event for consequence tracking
+    event_id = str(uuid.uuid4())
+    state.event_history.append({
+        "id": event_id, "type": "fire", "day": state.day, 
+        "desc": f"Fired {emp.name}", "entity_id": emp.id
+    })
     
     save_sessions()
     
@@ -529,12 +572,23 @@ def handle_personal_crisis(episode_id: str, agent_role: str, crisis_id: str, res
     if agent_role != crisis.target_role.value:
         return {"error": f"Unauthorized. Only the {crisis.target_role.value} can resolve this crisis."}
     
-    # Quality scoring (placeholder)
-    score = 0.5
-    if len(response) > 300:
-        score = 0.85
-    elif len(response) > 100:
-        score = 0.6
+    # Quality scoring - improved heuristic
+    def score_response(text: str) -> float:
+        s = 0.3  # Base
+        if len(text) > 500: s += 0.3
+        elif len(text) > 200: s += 0.15
+        
+        # Keywords for empathy, action, and structure
+        indicators = {
+            "understand": 0.05, "feel": 0.05, "plan": 0.05, "steps": 0.05,
+            "equity": 0.1, "bonus": 0.1, "vacation": 0.1, "talk": 0.05
+        }
+        for kw, bonus in indicators.items():
+            if kw in text.lower():
+                s += bonus
+        return min(1.0, s)
+
+    score = score_response(response)
     
     crisis.resolved = True
     crisis.resolution_quality = score
@@ -674,9 +728,13 @@ def deploy_to_production(episode_id: str, agent_role: str, version: str) -> dict
     else:
         state.uptime = max(0.80, state.uptime - 0.05)
         state.deploy_stability = max(0.0, state.deploy_stability - 0.15)
-        for c in state.customers:
-            c.satisfaction = max(0.0, c.satisfaction - 0.08)
-            c.churn_risk = min(1.0, c.churn_risk + 0.05)
+    # Log event for consequence tracking
+    event_id = str(uuid.uuid4())
+    state.event_history.append({
+        "id": event_id, "type": "deploy", "day": state.day, 
+        "desc": f"Deployed v{version}", "success": success, "tech_debt": state.tech_debt
+    })
+    
     save_sessions()
     return {
         "version": version, "deploy_number": state.deployed_version,
@@ -999,11 +1057,18 @@ def get_reward(episode_id: str) -> dict:
         episode_id: Unique identifier for the session.
     """
     state = _get_state(episode_id)
+    rng = _get_rng(episode_id)
     score = compute_reward(state)
+    
+    # Observe performance and get weaknesses for self-play
+    mm = MarketMaker(state, rng)
+    mm.observe_performance(score.total)
+    
     return {
         "day": state.day,
         "reward": score.total,
         "breakdown": score.breakdown(),
+        "weaknesses": list(mm.weaknesses),
         "cumulative": state.cumulative_reward,
         "history_length": len(state.reward_history),
         "is_done": state.is_done(),
