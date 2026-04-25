@@ -1,18 +1,34 @@
 import os
 import json
-import base58
 from typing import Optional, List, Dict, Any
 from hashlib import sha256
 from dotenv import load_dotenv
 
-from solders.keypair import Keypair
-from solders.pubkey import Pubkey
-from solders.system_program import ID as SYS_PROG_ID
-from solders.instruction import Instruction, AccountMeta
-from solana.rpc.async_api import AsyncClient
-from solana.rpc.commitment import Confirmed
-from solana.transaction import Transaction
-from solana.rpc.types import TxOpts
+# Solana proof support is optional: most users only need the environment + training.
+# On Colab/Windows, Solana python packages can conflict with the httpx/websockets
+# requirements of openenv-core/fastmcp. So we import lazily and degrade gracefully.
+_SOLANA_IMPORT_ERROR: Optional[str] = None
+try:
+    import base58  # noqa: F401
+    from solders.keypair import Keypair  # type: ignore
+    from solders.pubkey import Pubkey  # type: ignore
+    from solders.system_program import ID as SYS_PROG_ID  # type: ignore
+    from solders.instruction import Instruction, AccountMeta  # type: ignore
+    from solana.rpc.async_api import AsyncClient  # type: ignore
+    from solana.rpc.commitment import Confirmed  # type: ignore
+    from solana.transaction import Transaction  # type: ignore
+    from solana.rpc.types import TxOpts  # type: ignore
+except Exception as e:  # pragma: no cover
+    _SOLANA_IMPORT_ERROR = str(e)
+    Keypair = None  # type: ignore
+    Pubkey = None  # type: ignore
+    SYS_PROG_ID = None  # type: ignore
+    Instruction = None  # type: ignore
+    AccountMeta = None  # type: ignore
+    AsyncClient = None  # type: ignore
+    Confirmed = None  # type: ignore
+    Transaction = None  # type: ignore
+    TxOpts = None  # type: ignore
 
 # Load env vars
 load_dotenv()
@@ -26,10 +42,15 @@ class SolanaProofClient:
         self.keypair_json = os.getenv("GENESIS_SOLANA_KEYPAIR_JSON")
         self.commitment = os.getenv("GENESIS_SOLANA_COMMITMENT", "confirmed")
         
-        self.program_id = Pubkey.from_string(self.program_id_str) if self.program_id_str else None
+        if Pubkey is None:
+            self.program_id = None
+        else:
+            self.program_id = Pubkey.from_string(self.program_id_str) if self.program_id_str else None
         self.payer = self._load_keypair()
         
     def _load_keypair(self) -> Optional[Keypair]:
+        if Keypair is None:
+            return None
         if not self.keypair_json:
             return None
         try:
@@ -40,6 +61,9 @@ class SolanaProofClient:
             return None
 
     def is_configured(self) -> bool:
+        # Must have deps + env configuration.
+        if _SOLANA_IMPORT_ERROR is not None:
+            return False
         return all([self.program_id, self.payer, self.rpc_url])
 
     def get_episode_fingerprint(self, episode_id: str, seed: int) -> bytes:
@@ -49,6 +73,8 @@ class SolanaProofClient:
 
     def derive_checkpoint_pda(self, episode_fingerprint: bytes, checkpoint_index: int) -> Pubkey:
         """Derives the PDA for a specific checkpoint."""
+        if Pubkey is None or self.program_id is None:
+            raise RuntimeError("Solana dependencies not available (cannot derive PDA).")
         seeds = [
             b"genesis_proof",
             episode_fingerprint,
@@ -67,6 +93,14 @@ class SolanaProofClient:
         leaf_count: int
     ) -> Dict[str, Any]:
         if not self.is_configured():
+            if _SOLANA_IMPORT_ERROR is not None:
+                return {
+                    "success": False,
+                    "error": (
+                        "Solana proof dependencies are not installed or incompatible. "
+                        f"Import error: {_SOLANA_IMPORT_ERROR}"
+                    ),
+                }
             return {"success": False, "error": "Solana not configured in .env"}
 
         episode_fingerprint = self.get_episode_fingerprint(episode_id, seed)
