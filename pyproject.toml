@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "GENESIS — The Autonomous Startup Gauntlet. Train LLMs to co-found and operate a startup from Day 0 to Series A."
 requires-python = ">=3.10"
 dependencies = [
-    "openenv-core[core]>=0.2.2",
+    "openenv-core[core]>=0.2.3",
     "fastapi>=0.115.0",
     "pydantic>=2.0.0",
     "uvicorn>=0.24.0",
     "requests>=2.31.0",
     "fastmcp>=0.1.0",
     "numpy>=1.24.0",
+    "matplotlib>=3.8.0",
 ]
 
 [project.optional-dependencies]

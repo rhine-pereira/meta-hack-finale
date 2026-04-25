@@ -154,6 +154,48 @@ port: 7860
 | **Self-Improvement (Theme 4)** | MarketMaker generates harder scenarios based on agent weaknesses |
 | **Wild Card (Theme 5)** | Mid-episode pivot mechanic — strategic sunk-cost abandonment |
 
+## Hackathon Submission Checklist
+
+- [x] Uses OpenEnv with `openenv.yaml` manifest
+- [x] OpenEnv runtime server with MCP tools (`server/app.py`)
+- [x] Minimal training pipeline using Unsloth + TRL (`train.py`)
+- [x] Colab notebook for training (`colab/training.ipynb`)
+- [x] Reward plotting script (`scripts/plot_rewards.py`)
+- [x] Reward plot artifact committed (`outputs/evals/reward_curves.png`)
+- [x] Reward summary metrics committed (`outputs/evals/reward_summary.json`)
+- [ ] Hugging Face Space URL added below
+- [ ] Mini-blog (HF) or <2 min YouTube video URL added below
+
+## Submission Links (Fill Before Final Submission)
+
+- Hugging Face Space (required): `PASTE_SPACE_URL_HERE`
+- Mini-blog on Hugging Face or <2 min YouTube video (required): `PASTE_BLOG_OR_VIDEO_URL_HERE`
+
+Judges are expected to use the Space URL for evaluation. Update this section before submitting.
+
+## Minimal Colab Training Script
+
+Use the notebook at `colab/training.ipynb` for a reproducible baseline run in Colab using Unsloth + TRL.
+
+Notebook flow:
+
+1. Install dependencies.
+2. Run a smoke test (`python train.py --smoke`) to validate environment + reward pipeline.
+3. Run a short GRPO training command (`python train.py --steps 50`).
+4. Generate reward artifacts with `python scripts/plot_rewards.py`.
+
+## Training Evidence Artifacts
+
+- Reward curves: `outputs/evals/reward_curves.png`
+- Reward summary: `outputs/evals/reward_summary.json`
+
+## Reproduce Artifacts Locally
+
+```bash
+python train.py --smoke
+python scripts/plot_rewards.py --sessions sessions.pkl --out outputs/evals
+```
+
 ## License
 
 MIT
