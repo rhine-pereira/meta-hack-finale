@@ -160,6 +160,11 @@ class WorldState:
     })
     cofounder_alignment: float = 0.80  # 0-1
 
+    # ── Deployment tracking ──────────────────────────────────────
+    deployed_version: int = 0
+    last_deploy_day: Optional[int] = None
+    deploy_stability: float = 1.0  # 0-1
+
     # ── Pivot state ───────────────────────────────────────────────
     pivot_count: int = 0
     pivot_in_progress: bool = False
@@ -174,6 +179,9 @@ class WorldState:
     # ── Curriculum metadata ───────────────────────────────────────
     past_episode_rewards: list[float] = field(default_factory=list)
     market_adversary_level: int = 1
+
+    # ── MarketMaker persistence ───────────────────────────────────
+    market_maker_weaknesses: list[str] = field(default_factory=list)
 
     def runway_days(self) -> float:
         daily_revenue = self.mrr / 30.0
