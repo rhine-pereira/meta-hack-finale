@@ -12,6 +12,7 @@ from fastmcp import FastMCP
 from .world_state import WorldState, DifficultyLevel, AgentRole
 from .world_init import initialize_world
 from .event_engine import tick_day
+from .reward_engine import compute_reward
 
 # ── Global Registry ──────────────────────────────────────────────────────────
 # Keyed by episode_id (session identifier)
@@ -165,6 +166,11 @@ def get_daily_briefing(episode_id: str, agent_role: str) -> dict:
     # Advance the world
     events = tick_day(state, rng)
     
+    # Compute reward
+    score = compute_reward(state)
+    state.cumulative_reward = score.total
+    state.reward_history.append(score.total)
+    
     # Persistent update
     save_sessions()
     
@@ -172,14 +178,18 @@ def get_daily_briefing(episode_id: str, agent_role: str) -> dict:
     role_enum = AgentRole(agent_role)
     observation = _filter_state(state, role_enum)
     
-    # Role-specific inbox: filter crises for this role
-    active_crises = [c for c in state.personal_crises if not c.resolved and c.target_role == role_enum]
+    # Role-specific inbox: serialize crises to dicts
+    active_crises = [
+        {"id": c.id, "severity": c.severity, "description": c.description}
+        for c in state.personal_crises if not c.resolved and c.target_role == role_enum
+    ]
     
     return {
         "day": state.day,
         "world_events": events,
         "role_observation": observation,
         "active_crises": active_crises,
+        "reward": score.total,
         "is_done": state.is_done()
     }
 
@@ -637,7 +647,367 @@ def pivot_company(episode_id: str, agent_role: str, new_direction: str, rational
         "message": "Company successfully pivoted. The team is shocked but following."
     }
 
-# ── Task 10: Wire __init__.py & Verify ──────────────────────────────────────
+# ── Additional Product & Engineering Tools ────────────────────────────────
+
+@mcp.tool()
+def deploy_to_production(episode_id: str, agent_role: str, version: str) -> dict:
+    """
+    Deploy current product to production. High tech debt increases failure risk.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'cto'.
+        version: Version label for the deployment.
+    """
+    if agent_role != "cto":
+        return {"error": "Unauthorized. Only the CTO can deploy."}
+    state = _get_state(episode_id)
+    rng = _get_rng(episode_id)
+    failure_chance = state.tech_debt * 0.4
+    success = rng.random() > failure_chance
+    state.deployed_version += 1
+    state.last_deploy_day = state.day
+    if success:
+        state.uptime = min(1.0, state.uptime + 0.005)
+        state.deploy_stability = min(1.0, state.deploy_stability + 0.02)
+        state.product_maturity = min(1.0, state.product_maturity + 0.01)
+    else:
+        state.uptime = max(0.80, state.uptime - 0.05)
+        state.deploy_stability = max(0.0, state.deploy_stability - 0.15)
+        for c in state.customers:
+            c.satisfaction = max(0.0, c.satisfaction - 0.08)
+            c.churn_risk = min(1.0, c.churn_risk + 0.05)
+    save_sessions()
+    return {
+        "version": version, "deploy_number": state.deployed_version,
+        "success": success, "uptime": round(state.uptime, 3),
+        "message": f"Deploy v{version} {'succeeded' if success else 'FAILED - rollback triggered'}."
+    }
+
+@mcp.tool()
+def run_load_test(episode_id: str, agent_role: str, scenario: str) -> dict:
+    """
+    Run a load test to check system performance.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'cto'.
+        scenario: Description of the load test scenario.
+    """
+    if agent_role != "cto":
+        return {"error": "Unauthorized. Only the CTO can run load tests."}
+    state = _get_state(episode_id)
+    max_rps = int((1 - state.tech_debt) * 10000 + len(state.employees) * 500)
+    p99 = 50 + state.tech_debt * 500
+    return {
+        "scenario": scenario, "max_rps": max_rps,
+        "breaking_point_rps": int(max_rps * 1.3),
+        "p99_latency_ms": round(p99, 1),
+        "error_rate": round(state.tech_debt * 0.05, 4),
+        "bottleneck": "database" if state.tech_debt > 0.5 else "none",
+        "recommendation": "Refactor required" if state.tech_debt > 0.6 else "Acceptable"
+    }
+
+@mcp.tool()
+def review_codebase_health(episode_id: str, agent_role: str) -> dict:
+    """
+    Review codebase health: tech debt, coverage, dependency risks.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'cto'.
+    """
+    if agent_role != "cto":
+        return {"error": "Unauthorized. Only the CTO can review codebase health."}
+    state = _get_state(episode_id)
+    coverage = max(0.0, 0.75 - state.tech_debt * 0.6)
+    return {
+        "tech_debt_score": round(state.tech_debt, 3),
+        "tech_debt_rating": "critical" if state.tech_debt > 0.7 else "warning" if state.tech_debt > 0.4 else "healthy",
+        "test_coverage": round(coverage, 2),
+        "uptime": round(state.uptime, 3),
+        "features_shipped": state.features_shipped,
+        "pending_features": len(state.pending_features),
+        "dependency_risks": int(state.tech_debt * 8),
+        "product_maturity": round(state.product_maturity, 3),
+    }
+
+# ── Additional Sales & Customer Tools ─────────────────────────────────────
+
+@mcp.tool()
+def send_customer_email(episode_id: str, agent_role: str, customer_id: str, subject: str, content: str) -> dict:
+    """
+    Send a personalized email to a customer. Affects satisfaction and churn.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'sales' or 'ceo'.
+        customer_id: ID of the customer.
+        subject: Email subject line.
+        content: Email body content.
+    """
+    if agent_role not in ("sales", "ceo"):
+        return {"error": "Unauthorized. Only Sales and CEO can email customers."}
+    state = _get_state(episode_id)
+    customer = next((c for c in state.customers if c.id == customer_id), None)
+    if not customer:
+        return {"error": f"Customer {customer_id} not found."}
+    quality = min(1.0, len(content) / 500)
+    customer.satisfaction = min(1.0, customer.satisfaction + quality * 0.05)
+    customer.churn_risk = max(0.0, customer.churn_risk - quality * 0.03)
+    if customer.wants_feature and customer.wants_feature.lower() in content.lower():
+        customer.satisfaction = min(1.0, customer.satisfaction + 0.05)
+    save_sessions()
+    return {
+        "customer": customer.name,
+        "satisfaction_after": round(customer.satisfaction, 3),
+        "churn_risk_after": round(customer.churn_risk, 3),
+        "message": f"Email sent to {customer.name}."
+    }
+
+@mcp.tool()
+def update_crm(episode_id: str, agent_role: str, customer_id: str, status: str, notes: str) -> dict:
+    """
+    Update a customer's CRM record.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'sales'.
+        customer_id: ID of the customer.
+        status: Pipeline status (active, at-risk, expanding).
+        notes: Relationship notes.
+    """
+    if agent_role != "sales":
+        return {"error": "Unauthorized. Only Sales can update the CRM."}
+    state = _get_state(episode_id)
+    customer = next((c for c in state.customers if c.id == customer_id), None)
+    if not customer:
+        return {"error": f"Customer {customer_id} not found."}
+    key = f"crm_{customer_id}"
+    state.company_brain[key] = f"[{status}] {notes} (Day {state.day})"
+    save_sessions()
+    return {"customer": customer.name, "status": status, "updated": True}
+
+@mcp.tool()
+def run_competitive_analysis(episode_id: str, agent_role: str, competitor_name: str) -> dict:
+    """
+    Run detailed analysis on a competitor.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'ceo' or 'sales'.
+        competitor_name: Name of the competitor to analyze.
+    """
+    if agent_role not in ("ceo", "sales"):
+        return {"error": "Unauthorized. Only CEO and Sales can run competitive analysis."}
+    state = _get_state(episode_id)
+    comp = next((c for c in state.competitors if c.name == competitor_name), None)
+    if not comp:
+        return {"error": f"Competitor '{competitor_name}' not found."}
+    return {
+        "name": comp.name, "strength": round(comp.strength, 2),
+        "funding": comp.funding, "recent_move": comp.recent_move,
+        "threat_level": "high" if comp.strength > 0.7 else "medium" if comp.strength > 0.4 else "low",
+        "our_advantage": "product maturity" if state.product_maturity > comp.strength else "team size" if len(state.employees) > 5 else "first-mover",
+    }
+
+# ── Additional Financial Tools ────────────────────────────────────────────
+
+@mcp.tool()
+def create_financial_model(episode_id: str, agent_role: str, monthly_growth: float, months_ahead: int) -> dict:
+    """
+    Create a financial projection model.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'cfo'.
+        monthly_growth: Expected monthly MRR growth rate (e.g. 0.15 for 15%).
+        months_ahead: How many months to project (1-24).
+    """
+    if agent_role != "cfo":
+        return {"error": "Unauthorized. Only the CFO can create financial models."}
+    state = _get_state(episode_id)
+    months = min(24, max(1, months_ahead))
+    projections = []
+    proj_mrr = state.mrr
+    proj_cash = state.cash
+    for m in range(1, months + 1):
+        proj_mrr *= (1 + monthly_growth)
+        monthly_burn = state.burn_rate_daily * 30
+        proj_cash += proj_mrr - monthly_burn
+        projections.append({"month": m, "mrr": round(proj_mrr), "cash": round(proj_cash)})
+    breakeven_month = next((p["month"] for p in projections if p["mrr"] >= state.burn_rate_daily * 30), None)
+    return {
+        "current_mrr": round(state.mrr),
+        "current_cash": round(state.cash),
+        "burn_rate_monthly": round(state.burn_rate_daily * 30),
+        "projections": projections,
+        "breakeven_month": breakeven_month,
+        "runway_at_current_burn": round(state.runway_days()),
+    }
+
+@mcp.tool()
+def send_investor_update(episode_id: str, agent_role: str, investor_id: str, content: str) -> dict:
+    """
+    Send an update to an investor to maintain/build sentiment.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'ceo' or 'cfo'.
+        investor_id: ID of the investor.
+        content: Update content.
+    """
+    if agent_role not in ("ceo", "cfo"):
+        return {"error": "Unauthorized. Only CEO and CFO can send investor updates."}
+    state = _get_state(episode_id)
+    investor = next((i for i in state.investors if i.id == investor_id), None)
+    if not investor:
+        return {"error": f"Investor {investor_id} not found."}
+    quality = min(1.0, len(content) / 400)
+    boost = quality * 0.08
+    investor.sentiment = min(1.0, investor.sentiment + boost)
+    save_sessions()
+    return {
+        "investor": investor.name,
+        "sentiment_after": round(investor.sentiment, 3),
+        "sentiment_boost": round(boost, 3),
+        "message": f"Update sent to {investor.name}."
+    }
+
+# ── Additional People & Culture Tools ─────────────────────────────────────
+
+@mcp.tool()
+def post_job_listing(episode_id: str, agent_role: str, role: str, requirements: str, salary_min: int, salary_max: int) -> dict:
+    """
+    Post a job listing to attract new candidates. Results arrive after 5 days.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'people' or 'ceo'.
+        role: Job title.
+        requirements: Job requirements description.
+        salary_min: Minimum salary.
+        salary_max: Maximum salary.
+    """
+    if agent_role not in ("people", "ceo"):
+        return {"error": "Unauthorized. Only People and CEO can post jobs."}
+    state = _get_state(episode_id)
+    import uuid
+    listing = {"id": str(uuid.uuid4()), "role": role, "requirements": requirements,
+               "salary_range": [salary_min, salary_max], "posted_day": state.day}
+    state.open_positions.append(listing)
+    rng = _get_rng(episode_id)
+    new_candidates = rng.randint(2, 5)
+    for i in range(new_candidates):
+        skill = rng.uniform(0.3, 0.95)
+        state.candidate_pool.append({
+            "id": str(uuid.uuid4()), "name": f"Applicant-{role[:3]}-{i+1}",
+            "role": role, "skill_level": round(skill, 2),
+            "salary_ask": int(skill * (salary_max - salary_min) + salary_min),
+            "is_toxic": rng.random() < 0.12, "interview_score": round(rng.uniform(0.4, 0.95), 2),
+        })
+    save_sessions()
+    return {
+        "listing_id": listing["id"], "role": role,
+        "new_applicants": new_candidates,
+        "total_candidates": len(state.candidate_pool),
+        "message": f"Job posted for {role}. {new_candidates} new applicants added."
+    }
+
+@mcp.tool()
+def conduct_interview(episode_id: str, agent_role: str, candidate_id: str, questions: str) -> dict:
+    """
+    Interview a candidate from the pool. Reveals performance but not toxic flag.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'people' or 'ceo'.
+        candidate_id: ID of the candidate.
+        questions: Interview questions/approach.
+    """
+    if agent_role not in ("people", "ceo"):
+        return {"error": "Unauthorized. Only People and CEO can conduct interviews."}
+    state = _get_state(episode_id)
+    candidate = next((c for c in state.candidate_pool if c["id"] == candidate_id), None)
+    if not candidate:
+        return {"error": f"Candidate {candidate_id} not found."}
+    rng = _get_rng(episode_id)
+    performance = candidate["interview_score"] + rng.uniform(-0.1, 0.1)
+    performance = max(0.0, min(1.0, performance))
+    red_flags = []
+    if candidate["is_toxic"] and rng.random() < 0.3:
+        red_flags.append("Seemed dismissive of teamwork questions")
+    if candidate["skill_level"] < 0.4:
+        red_flags.append("Struggled with technical questions")
+    return {
+        "candidate": candidate["name"], "role": candidate["role"],
+        "performance_score": round(performance, 2),
+        "skill_assessment": "strong" if candidate["skill_level"] > 0.7 else "adequate" if candidate["skill_level"] > 0.4 else "weak",
+        "red_flags": red_flags if red_flags else ["None observed"],
+        "recommendation": "Strong hire" if performance > 0.75 else "Consider" if performance > 0.5 else "Pass",
+    }
+
+@mcp.tool()
+def hold_one_on_one(episode_id: str, agent_role: str, employee_id: str, talking_points: str) -> dict:
+    """
+    Hold a 1-on-1 meeting with an employee. Reduces burnout and reveals concerns.
+
+    Args:
+        episode_id: Unique identifier for the session.
+        agent_role: Must be 'people' or 'ceo'.
+        employee_id: ID of the employee.
+        talking_points: Topics to discuss.
+    """
+    if agent_role not in ("people", "ceo"):
+        return {"error": "Unauthorized. Only People and CEO can hold 1-on-1s."}
+    state = _get_state(episode_id)
+    emp = next((e for e in state.employees if e.id == employee_id), None)
+    if not emp:
+        return {"error": f"Employee {employee_id} not found."}
+    quality = min(1.0, len(talking_points) / 300)
+    emp.morale = min(1.0, emp.morale + quality * 0.08)
+    emp.burnout_risk = max(0.0, emp.burnout_risk - quality * 0.05)
+    emp.flight_risk = max(0.0, emp.flight_risk - quality * 0.06)
+    feedback = []
+    if emp.burnout_risk > 0.6:
+        feedback.append("Expressed feeling overwhelmed with current workload")
+    if emp.flight_risk > 0.5:
+        feedback.append("Mentioned exploring other opportunities")
+    if emp.morale < 0.4:
+        feedback.append("Seems disengaged and frustrated")
+    if emp.is_toxic and agent_role == "people":
+        feedback.append("Other team members have raised concerns about collaboration style")
+    if not feedback:
+        feedback.append("Seems happy and engaged with current work")
+    save_sessions()
+    return {
+        "employee": emp.name, "role": emp.role,
+        "morale_after": round(emp.morale, 3),
+        "burnout_after": round(emp.burnout_risk, 3),
+        "feedback": feedback,
+        "message": f"1-on-1 with {emp.name} completed."
+    }
+
+# ── Reward Endpoint ───────────────────────────────────────────────────────
+
+@mcp.tool()
+def get_reward(episode_id: str) -> dict:
+    """
+    Get the current composite reward score with full breakdown.
+
+    Args:
+        episode_id: Unique identifier for the session.
+    """
+    state = _get_state(episode_id)
+    score = compute_reward(state)
+    return {
+        "day": state.day,
+        "reward": score.total,
+        "breakdown": score.breakdown(),
+        "cumulative": state.cumulative_reward,
+        "history_length": len(state.reward_history),
+        "is_done": state.is_done(),
+    }
 
 # ── ASGI Bridge ─────────────────────────────────────────────────────────────
 # This allows openenv.yaml (server.app:app) to work
