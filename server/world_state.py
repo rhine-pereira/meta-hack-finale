@@ -90,7 +90,9 @@ class PersonalCrisis:
     description: str
     severity: float           # 0-1
     resolved: bool = False
-    resolution_quality: float = 0.0  # 0-1 set when resolved
+    injected_day: int = 0
+    ignored: bool = False
+    resolution_quality: float = 0.0  # 0-1 score based on agent response
 
 
 @dataclass
@@ -179,6 +181,10 @@ class WorldState:
     # ── Curriculum metadata ───────────────────────────────────────
     past_episode_rewards: list[float] = field(default_factory=list)
     market_adversary_level: int = 1
+
+    # ── Consequence tracking ──────────────────────────────────────
+    event_history: list[dict] = field(default_factory=list) # e.g. {"id": "ev1", "type": "hire", "day": 10, "desc": "..."}
+    causal_links: list[dict] = field(default_factory=list)  # e.g. {"cause_id": "ev1", "effect_id": "ev2", "delay": 30}
 
     # ── MarketMaker persistence ───────────────────────────────────
     market_maker_weaknesses: list[str] = field(default_factory=list)

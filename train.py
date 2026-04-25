@@ -19,8 +19,11 @@ import argparse
 import json
 import os
 import random
+import subprocess
 import sys
+import time
 import uuid
+from dataclasses import dataclass, field as dc_field
 
 # ── Argument Parsing ──────────────────────────────────────────────────────────
 
@@ -40,14 +43,24 @@ parser.add_argument("--num-generations", type=int, default=4,
                     help="GRPO completions per prompt")
 args, _ = parser.parse_known_args()
 
-# ── Server imports (direct, no subprocess) ────────────────────────────────────
-# We import server internals directly for speed — no IPC overhead.
-sys.path.insert(0, os.path.dirname(__file__))
+# ── OpenEnv Client (MCP) ──────────────────────────────────────────────────────
+from client import GenesisEnv
+import openenv.core.mcp_client
+from mcp.client.sse import sse_client
+from mcp.client.session import ClientSession
+from contextlib import AsyncExitStack
 
-from server.world_state import WorldState, AgentRole, DifficultyLevel  # noqa: E402
-from server.world_init import initialize_world  # noqa: E402
-from server.event_engine import tick_day  # noqa: E402
-from server.reward_engine import compute_reward, RubricScore  # noqa: E402
+# OpenEnv's MCPToolClient defaults to WebSockets, but FastMCP uses SSE.
+# We patch it to use SSE for local training compatibility.
+async def _patched_connect(self):
+    self._exit_stack = AsyncExitStack()
+    # FastMCP SSE endpoint is at /mcp
+    endpoint = self._production_mcp_url.rstrip("/") + "/mcp"
+    self._read, self._write = await self._exit_stack.enter_async_context(sse_client(endpoint))
+    self._session = await self._exit_stack.enter_async_context(ClientSession(self._read, self._write))
+    await self._session.initialize()
+
+openenv.core.mcp_client.MCPClientBase.connect = _patched_connect
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -81,43 +94,92 @@ ROLE_ALLOWED_TOOLS = {
                "check_bank_balance", "send_message", "negotiate_with_investor"},
 }
 
+# ── Self-Play State ──────────────────────────────────────────────────────────
+
+@dataclass
+class SelfPlayState:
+    """Persists MarketMaker knowledge across training episodes."""
+    episode_rewards: list[float] = dc_field(default_factory=list)
+    detected_weaknesses: list[str] = dc_field(default_factory=list)
+    current_difficulty: int = DIFFICULTY
+    episodes_at_current_level: int = 0
+    PROMOTE_THRESHOLD: float = 0.65   # avg reward to level up
+    DEMOTE_THRESHOLD: float = 0.30    # avg reward to level down
+    WINDOW: int = 10                  # rolling window for avg
+
+    def record(self, reward: float, weaknesses: list[str]) -> None:
+        self.episode_rewards.append(reward)
+        for w in weaknesses:
+            if w not in self.detected_weaknesses:
+                self.detected_weaknesses.append(w)
+        self.episodes_at_current_level += 1
+
+    def next_difficulty(self) -> int:
+        if len(self.episode_rewards) < self.WINDOW:
+            return self.current_difficulty
+        recent_avg = sum(self.episode_rewards[-self.WINDOW:]) / self.WINDOW
+        if recent_avg > self.PROMOTE_THRESHOLD and self.current_difficulty < 5:
+            self.current_difficulty = min(5, self.current_difficulty + 1)
+            self.episodes_at_current_level = 0
+            print(f"[MarketMaker] ⬆ Promoted to difficulty {self.current_difficulty} (avg={recent_avg:.3f})")
+        elif recent_avg < self.DEMOTE_THRESHOLD and self.current_difficulty > 1:
+            self.current_difficulty = max(1, self.current_difficulty - 1)
+            self.episodes_at_current_level = 0
+            print(f"[MarketMaker] ⬇ Demoted to difficulty {self.current_difficulty} (avg={recent_avg:.3f})")
+        return self.current_difficulty
+
+# Module-level persistent self-play state
+_self_play = SelfPlayState()
+
 # ── Episode Runner ────────────────────────────────────────────────────────────
 
-def run_episode(role: str, action_text: str, seed: int | None = None) -> RubricScore:
+def run_episode(role: str, action_text: str, seed: int | None = None,
+                difficulty_override: int | None = None) -> tuple[dict, list[str]]:
     """
-    Run a single mini-episode using one model completion as the agent action.
-
-    The model output is parsed as JSON tool call(s). Each day the agent:
-    1. Receives the daily briefing (observation)
-    2. Executes its parsed tool call
-    3. World ticks forward
-
-    Returns the final RubricScore after EPISODE_DAYS days.
+    Run a single mini-episode using the OpenEnv GenesisEnv client.
+    
+    This uses the standardized MCP tool interface, ensuring the training
+    environment matches the production environment exactly.
     """
-    rng = random.Random(seed or random.randint(0, 2**31))
-    state = initialize_world(difficulty=DifficultyLevel(DIFFICULTY), seed=rng.randint(0, 2**31))
-    state.episode_id = str(uuid.uuid4())
-
-    role_enum = AgentRole(role)
-
-    # Parse model output into tool calls (list of dicts)
-    tool_calls = _parse_tool_calls(action_text, role)
-
-    for day in range(EPISODE_DAYS):
-        tick_day(state, rng)
-
-        if state.is_done():
-            break
-
-        # Execute one tool call per day (round-robin through parsed calls)
-        if tool_calls:
-            call = tool_calls[day % len(tool_calls)]
-            _execute_tool_call(state, rng, role_enum, call)
-        else:
-            # No valid tool call — agent is silent, small penalty via inaction
-            pass
-
-    return compute_reward(state)
+    episode_id = str(uuid.uuid4())
+    eff_difficulty = difficulty_override if difficulty_override else DIFFICULTY
+    
+    # Use the OpenEnv client to interact with the environment
+    with GenesisEnv(base_url="http://127.0.0.1:7860").sync() as env:
+        # 1. Reset the environment
+        env.call_tool("reset", episode_id=episode_id, difficulty=eff_difficulty, seed=seed or 42)
+        
+        # 2. Parse model output into tool calls
+        tool_calls = _parse_tool_calls(action_text, role)
+        
+        # 3. Simulation loop
+        for day in range(EPISODE_DAYS):
+            # Step the day and get briefing
+            obs = env.call_tool("get_daily_briefing", episode_id=episode_id, agent_role=role)
+            
+            if obs.get("is_done"):
+                break
+                
+            # Execute one tool call per day
+            if tool_calls:
+                call = tool_calls[day % len(tool_calls)]
+                tool_name = call.get("tool", "make_decision")
+                args = call.get("args", {})
+                
+                # Inject required context if missing
+                args["episode_id"] = episode_id
+                args["agent_role"] = role
+                
+                try:
+                    env.call_tool(tool_name, **args)
+                except Exception:
+                    # Invalid tool calls are ignored during training
+                    pass
+        
+        # 4. Get final reward and weaknesses for self-play
+        reward_data = env.call_tool("get_reward", episode_id=episode_id)
+        
+    return reward_data, reward_data.get("weaknesses", [])
 
 
 def _parse_tool_calls(text: str, role: str) -> list[dict]:
@@ -160,110 +222,6 @@ def _parse_tool_calls(text: str, role: str) -> list[dict]:
         }]
 
 
-def _execute_tool_call(state: WorldState, rng: random.Random,
-                        role: AgentRole, call: dict) -> None:
-    """Execute a single parsed tool call against the world state."""
-    tool = call.get("tool", "make_decision")
-    args = call.get("args", {})
-
-    try:
-        if tool == "make_decision":
-            decision = args.get("decision", "No decision")
-            reasoning = args.get("reasoning", "")
-            decision_type = args.get("decision_type", "tactical")
-            log_key = f"decision_log_{state.day}"
-            state.company_brain[log_key] = (
-                state.company_brain.get(log_key, "") +
-                f"\n[{role.value.upper()}] {decision_type}: {decision} ({reasoning})"
-            )
-            align_delta = 0.01 if decision_type == "strategic" else 0.002
-            state.cofounder_alignment = min(1.0, state.cofounder_alignment + align_delta)
-
-        elif tool == "build_feature" and role == AgentRole.CTO:
-            from server.world_state import PendingFeature
-            comp_map = {"low": (5, 0.02), "medium": (15, 0.07), "high": (30, 0.18)}
-            complexity = args.get("complexity", "medium")
-            days, debt = comp_map.get(complexity, comp_map["medium"])
-            engineers = max(1, int(args.get("engineers", 1)))
-            state.pending_features.append(PendingFeature(
-                name=args.get("name", "Feature"),
-                complexity=complexity,
-                engineers_assigned=engineers,
-                days_remaining=days,
-                tech_debt_added=debt,
-            ))
-
-        elif tool == "write_company_brain":
-            key = args.get("key", f"note_{state.day}")
-            value = args.get("value", "")
-            state.company_brain[key] = value
-
-        elif tool == "read_company_brain":
-            pass  # Read-only — no state change
-
-        elif tool == "analyze_market":
-            pass  # Observation only — no state change
-
-        elif tool == "send_message":
-            from server.world_state import Message
-            try:
-                to_role = AgentRole(args.get("to_role", "ceo"))
-            except ValueError:
-                to_role = AgentRole.CEO
-            state.messages.append(Message(
-                id=str(uuid.uuid4()),
-                from_role=role,
-                to_role=to_role,
-                subject=args.get("subject", "Update"),
-                content=args.get("content", ""),
-                day=state.day,
-            ))
-
-        elif tool == "check_bank_balance" and role in (AgentRole.CEO, AgentRole.CFO):
-            pass  # Observation only
-
-        elif tool == "check_team_morale":
-            pass  # Observation only
-
-        elif tool == "negotiate_with_investor" and role in (AgentRole.CEO, AgentRole.CFO):
-            investor_id = args.get("investor_id", "")
-            inv = next((i for i in state.investors if i.id == investor_id), None)
-            if inv:
-                valuation = float(args.get("valuation", state.valuation))
-                equity = float(args.get("equity", 0.15))
-                score = inv.sentiment * (state.arr() / 1_000_000 + 0.1)
-                if score > 0.4 and valuation <= state.valuation * 2.0 and equity <= 0.25:
-                    inv.has_term_sheet = True
-                    inv.term_sheet_valuation = valuation
-                    inv.term_sheet_equity = equity
-                    state.equity_sold += equity
-                    inv.sentiment = min(1.0, inv.sentiment + 0.2)
-
-        elif tool == "pivot_company" and role == AgentRole.CEO:
-            state.pivot_count += 1
-            state.pivot_in_progress = True
-            state.pivot_direction = args.get("new_direction", "new market")
-            for emp in state.employees:
-                emp.morale = max(0.0, emp.morale - 0.15)
-            for r in state.cofounder_morale:
-                state.cofounder_morale[r] = max(0.0, state.cofounder_morale[r] - 0.10)
-
-        elif tool == "handle_personal_crisis" and role == AgentRole.PEOPLE:
-            crisis_id = args.get("crisis_id", "")
-            response = args.get("response", "")
-            crisis = next((c for c in state.personal_crises if c.id == crisis_id), None)
-            if crisis and not crisis.resolved:
-                quality = min(1.0, len(response) / 300)
-                crisis.resolved = True
-                crisis.resolution_quality = 0.5 + quality * 0.5
-                state.crises_resolved += 1
-
-        elif tool in ("hire_candidate", "fire_employee"):
-            pass  # Simplified — skip complex hiring logic in training
-
-    except Exception:
-        # Any execution error is silently swallowed during training
-        pass
 
 
 # ── Reward Function for GRPO ──────────────────────────────────────────────────
@@ -285,8 +243,16 @@ def genesis_reward_fn(completions: list[str], prompts: list[str], **kwargs) -> l
         seed = random.randint(0, 2**31)
 
         try:
-            score = run_episode(role=role, action_text=completion, seed=seed)
-            rewards.append(float(score.total))
+            reward_data, weaknesses = run_episode(
+                role=role,
+                action_text=completion,
+                seed=seed,
+                difficulty_override=_self_play.current_difficulty,
+            )
+            reward = float(reward_data.get("reward", 0.0))
+            _self_play.record(reward, weaknesses)
+            _self_play.next_difficulty()
+            rewards.append(reward)
         except Exception as e:
             # Failed episode gets zero reward
             print(f"[WARN] Episode failed: {e}", file=sys.stderr)
@@ -411,14 +377,19 @@ def smoke_test():
     ]
 
     for role, action in test_cases:
-        score = run_episode(role=role, action_text=action, seed=42)
+        reward_data, weaknesses = run_episode(role=role, action_text=action, seed=42)
+        reward = reward_data.get("reward", 0.0)
+        _self_play.record(reward, weaknesses)
         print(f"\n  Role: {role.upper()}")
         print(f"  Action: {action[:60]}...")
-        print(f"  Reward: {score.total:.4f}")
+        print(f"  Reward: {reward:.4f}")
         print("  Breakdown:")
-        for k, v in score.breakdown().items():
+        for k, v in reward_data.get("breakdown", {}).items():
             if k != "total" and v > 0:
                 print(f"    {k}: {v:.3f}")
+        print(f"  Weaknesses: {weaknesses}")
+
+    print(f"\nFinal self-play state: difficulty={_self_play.current_difficulty}, weaknesses={_self_play.detected_weaknesses}")
 
     print("\n" + "=" * 60)
     print("Smoke test passed!")
@@ -549,10 +520,51 @@ def train():
     print(f"Baseline reward (random CEO action): {test_score.total:.4f}")
 
 
+# ── Server Lifecycle ──────────────────────────────────────────────────────────
+
+def start_openenv_server():
+    """Start the GENESIS MCP server in a background process."""
+    print("Starting GENESIS OpenEnv server (uvicorn server.app:app)...")
+    # Clean up old session files to ensure a fresh state
+    if os.path.exists("sessions.pkl"):
+        os.remove("sessions.pkl")
+        
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "7860", "--log-level", "warning"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    
+    # Wait for server to be ready
+    import requests
+    max_retries = 15
+    for i in range(max_retries):
+        try:
+            # We check the root or some endpoint to confirm it's up
+            requests.get("http://127.0.0.1:7860/")
+            print("Server ready.")
+            return proc
+        except requests.exceptions.ConnectionError:
+            if i % 3 == 0:
+                print(f"Waiting for server... ({i}/{max_retries})")
+            time.sleep(1)
+            
+    proc.terminate()
+    raise RuntimeError("Failed to start GENESIS server after 15 seconds.")
+
+
 # ── Entry Point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    if args.smoke:
-        smoke_test()
-    else:
-        train()
+    server_proc = None
+    try:
+        server_proc = start_openenv_server()
+        if args.smoke:
+            smoke_test()
+        else:
+            train()
+    finally:
+        if server_proc:
+            print("Shutting down GENESIS server...")
+            server_proc.terminate()
+            server_proc.wait()

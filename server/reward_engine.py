@@ -61,11 +61,9 @@ def compute_reward(state: WorldState) -> RubricScore:
     """Compute the full composable rubric reward for the current state."""
     score = RubricScore()
 
-    # 1. Company Valuation (0-1 normalised against target $10M ARR)
-    # Valuation proxy: ARR * 8x multiple, capped at $80M for normalisation
-    arr = state.arr()
-    implied_val = arr * 8 + state.product_maturity * 2_000_000
-    score.company_valuation = min(implied_val / 20_000_000, 1.0)
+    # 1. Company Valuation (normalised against a $20M target for reward scaling)
+    # Use the state's valuation if it's already computed, or a proxy
+    score.company_valuation = min(state.valuation / 20_000_000, 1.0)
 
     # 2. Series A Success (binary, only counted at end)
     score.series_a_success = 1.0 if state.series_a_closed else 0.0
@@ -107,12 +105,17 @@ def compute_reward(state: WorldState) -> RubricScore:
     # 7. Co-founder Alignment
     score.cofounder_alignment = state.cofounder_alignment
 
-    # 8. Personal Crisis Handling
+    # 8. Personal Crisis Handling (factors in quality of resolution)
     total_crises = state.crises_resolved + state.crises_ignored
     if total_crises == 0:
         score.personal_crisis_handling = 0.5  # neutral — no crises yet
     else:
-        score.personal_crisis_handling = state.crises_resolved / total_crises
+        resolved_crises = [c for c in state.personal_crises if c.resolved]
+        avg_quality = sum(c.resolution_quality for c in resolved_crises) / len(resolved_crises) if resolved_crises else 0.0
+        
+        # Penalise for ignored crises relative to total
+        ignore_penalty = (state.crises_ignored / total_crises) * 0.4
+        score.personal_crisis_handling = max(0.0, avg_quality - ignore_penalty)
 
     # 9. Decision Coherence (proxy: CompanyBrain has substantive entries)
     # A well-maintained CompanyBrain signals structured long-horizon planning
