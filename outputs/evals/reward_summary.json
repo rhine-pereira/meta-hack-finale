@@ -1,6 +1,6 @@
 {
-  "num_sessions_with_history": 6,
-  "avg_final_reward": 0.3477,
-  "best_final_reward": 0.4472,
-  "worst_final_reward": 0.2655
+  "num_sessions_with_history": 3,
+  "avg_final_reward": 0.3247,
+  "best_final_reward": 0.3247,
+  "worst_final_reward": 0.3247
 }

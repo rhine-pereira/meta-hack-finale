@@ -11,8 +11,7 @@ Usage:
     python train.py --steps 50          # Quick dev run
 
 Requirements:
-    pip install trl transformers unsloth datasets torch
-    (unsloth: https://github.com/unslothai/unsloth)
+    pip install trl transformers datasets accelerate peft bitsandbytes
 """
 
 import sys
@@ -45,14 +44,35 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass, field as dc_field
+from typing import Any, Dict, Optional, Tuple
+
+# --- Windows UTF-8 guard (fixes TRL template read on cp1252) ---
+# Some TRL versions ship Jinja templates containing bytes that fail under the default
+# Windows "cp1252" locale when pathlib.read_text() is called without encoding.
+# Force UTF-8 mode early so downstream libraries read text as UTF-8.
+os.environ.setdefault("PYTHONUTF8", "1")
+os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+# --- Torch compile / Triton guard (Windows + venv safe) ---
+# On Windows, PyTorch wheels often do NOT ship Triton, but newer Transformers paths can
+# indirectly import torch._dynamo / torch._inductor which then tries `import triton.backends`
+# and crashes. We do not need torch.compile/inductor for GRPO, so disable them *hard*.
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["TORCHINDUCTOR_DISABLE"] = "1"
+os.environ["TORCH_COMPILE_DISABLE"] = "1"
+os.environ["DISABLE_TORCH_COMPILE"] = "1"
 
 # ── Argument Parsing ──────────────────────────────────────────────────────────
 
 parser = argparse.ArgumentParser(description="Train LLMs on GENESIS startup simulation")
 parser.add_argument("--smoke", action="store_true", help="Run a smoke test without training")
 parser.add_argument("--steps", type=int, default=200, help="Max training steps")
-parser.add_argument("--model", type=str, default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
-                    help="Model to fine-tune")
+parser.add_argument(
+    "--model",
+    type=str,
+    default="Qwen/Qwen2.5-3B-Instruct",
+    help="Base model to fine-tune (adapter will be saved, base remains external).",
+)
 parser.add_argument("--output", type=str, default="./genesis-checkpoints",
                     help="Output directory for checkpoints")
 parser.add_argument("--difficulty", type=int, default=1,
@@ -60,9 +80,42 @@ parser.add_argument("--difficulty", type=int, default=1,
                     help="GENESIS difficulty (1=Tutorial/90d, 2=Seed/180d)")
 parser.add_argument("--episode-days", type=int, default=30,
                     help="Days per training episode (shorter = faster reward)")
-parser.add_argument("--num-generations", type=int, default=4,
-                    help="GRPO completions per prompt")
+parser.add_argument("--num-generations", type=int, default=2, help="GRPO completions per prompt")
+parser.add_argument(
+    "--max-completion-length",
+    type=int,
+    default=128,
+    help="Token budget per completion. Lower is faster.",
+)
+parser.add_argument(
+    "--dataset-multiplier",
+    type=int,
+    default=20,
+    help="Replicate role prompts to create a synthetic training set.",
+)
+parser.add_argument(
+    "--skip-briefing",
+    action="store_true",
+    help="Skip get_daily_briefing calls during reward rollouts (faster, less signal).",
+)
+parser.add_argument(
+    "--fast",
+    action="store_true",
+    help="Speed-first profile (fewer generations, shorter completions, fewer days).",
+)
 args, _ = parser.parse_known_args()
+
+# Apply a conservative speed profile for laptop GPUs / time-boxed runs.
+if args.fast:
+    if args.num_generations > 1:
+        args.num_generations = 1
+    if args.max_completion_length > 96:
+        args.max_completion_length = 96
+    if args.dataset_multiplier > 8:
+        args.dataset_multiplier = 8
+    if args.episode_days > 15:
+        args.episode_days = 15
+    args.skip_briefing = True
 
 # ── OpenEnv Client (MCP) ──────────────────────────────────────────────────────
 from client import GenesisEnv
@@ -146,6 +199,26 @@ class SelfPlayState:
 # Module-level persistent self-play state
 _self_play = SelfPlayState()
 
+# Shared env client (significant speedup vs reconnecting per completion)
+_shared_env = None
+
+
+def _get_shared_env():
+    global _shared_env
+    if _shared_env is None:
+        _shared_env = _create_env_client()
+    return _shared_env
+
+
+def _close_shared_env():
+    global _shared_env
+    if _shared_env is not None:
+        try:
+            _shared_env.close()
+        except Exception:
+            pass
+        _shared_env = None
+
 # ── Episode Runner ────────────────────────────────────────────────────────────
 
 def run_episode(role: str, action_text: str, seed: int | None = None,
@@ -159,45 +232,42 @@ def run_episode(role: str, action_text: str, seed: int | None = None,
     episode_id = str(uuid.uuid4())
     eff_difficulty = difficulty_override if difficulty_override else DIFFICULTY
 
-    # Use the OpenEnv client to interact with the environment.
-    # Production mode calls FastMCP /mcp directly and avoids /ws assumptions.
-    env = _create_env_client()
-    try:
-        # 1. Reset the environment
-        env.call_tool("reset", episode_id=episode_id, difficulty=eff_difficulty, seed=seed or 42)
-        
-        # 2. Parse model output into tool calls
-        tool_calls = _parse_tool_calls(action_text, role)
-        
-        # 3. Simulation loop
-        for day in range(EPISODE_DAYS):
-            # Step the day and get briefing
-            obs = env.call_tool("get_daily_briefing", episode_id=episode_id, agent_role=role)
-            
-            if obs.get("is_done"):
-                break
-                
-            # Execute one tool call per day
-            if tool_calls:
-                call = tool_calls[day % len(tool_calls)]
-                tool_name = call.get("tool", "make_decision")
-                args = call.get("args", {})
-                
-                # Inject required context if missing
-                args["episode_id"] = episode_id
-                args["agent_role"] = role
-                
-                try:
-                    env.call_tool(tool_name, **args)
-                except Exception:
-                    # Invalid tool calls are ignored during training
-                    pass
-        
-        # 4. Get final reward and weaknesses for self-play
-        reward_data = env.call_tool("get_reward", episode_id=episode_id)
+    env = _get_shared_env()
+    # 1. Reset the environment
+    env.call_tool("reset", episode_id=episode_id, difficulty=eff_difficulty, seed=seed or 42)
 
-    finally:
-        env.close()
+    # 2. Parse model output into tool calls
+    tool_calls = _parse_tool_calls(action_text, role)
+
+    # 3. Simulation loop
+    for day in range(EPISODE_DAYS):
+        # Step the day and optionally get briefing (briefing adds signal but costs time)
+        if args.skip_briefing:
+            obs = {"is_done": False}
+        else:
+            obs = env.call_tool("get_daily_briefing", episode_id=episode_id, agent_role=role)
+
+        if obs.get("is_done"):
+            break
+
+        # Execute one tool call per day
+        if tool_calls:
+            call = tool_calls[day % len(tool_calls)]
+            tool_name = call.get("tool", "make_decision")
+            tool_args = call.get("args", {})
+
+            # Inject required context if missing
+            tool_args["episode_id"] = episode_id
+            tool_args["agent_role"] = role
+
+            try:
+                env.call_tool(tool_name, **tool_args)
+            except Exception:
+                # Invalid tool calls are ignored during training
+                pass
+
+    # 4. Get final reward and weaknesses for self-play
+    reward_data = env.call_tool("get_reward", episode_id=episode_id)
 
     return reward_data, reward_data.get("weaknesses", [])
 
@@ -429,7 +499,7 @@ def smoke_test():
 # ── Main Training Loop ────────────────────────────────────────────────────────
 
 def train():
-    """Full training run using TRL GRPOTrainer with Unsloth QLoRA."""
+    """Full training run using TRL GRPOTrainer + bitsandbytes 4-bit + LoRA (PEFT)."""
     print("=" * 60)
     print("GENESIS — Training LLMs to Co-Found a Startup")
     print(f"Model:      {args.model}")
@@ -441,9 +511,9 @@ def train():
 
     # ── Import ML dependencies (only when training) ───────────────
     try:
-        import transformers
-        from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
-        from unsloth import FastLanguageModel
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        from peft import LoraConfig, TaskType, get_peft_model
         from trl import GRPOConfig, GRPOTrainer
         from datasets import Dataset
     except ImportError as e:
@@ -451,34 +521,49 @@ def train():
         print("Detailed error for debugging:")
         import traceback
         traceback.print_exc()
-        print("\nInstall with: pip install trl transformers unsloth datasets torch")
+        print("\nInstall with: pip install trl transformers datasets accelerate peft bitsandbytes")
         sys.exit(1)
 
     # ── Model Setup ───────────────────────────────────────────────
     print("\nLoading model...")
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=args.model,
-        max_seq_length=2048,
+    bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
-        dtype=None,  # Auto-detect
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
     )
 
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                         "gate_proj", "up_proj", "down_proj"],
-        lora_alpha=32,
-        lora_dropout=0,
-        bias="none",
-        use_gradient_checkpointing="unsloth",
-        random_state=42,
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch.float16,
+        low_cpu_mem_usage=True,
     )
-    print(f"Model loaded. Trainable params: {model.num_parameters():,}")
+    model.config.use_cache = False
+
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Qwen2.5 works well with these projection modules for LoRA
+    lora_config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+    model = get_peft_model(model, lora_config)
+    try:
+        model.print_trainable_parameters()
+    except Exception:
+        pass
 
     # ── Dataset ───────────────────────────────────────────────────
     print("\nBuilding dataset...")
-    raw_data = build_dataset(n_samples=max(args.steps * 2, 200))
+    raw_data = build_dataset(n_samples=max(args.steps * 2, 200) * args.dataset_multiplier)
 
     # Apply chat template to convert messages → prompt strings
     def format_sample(sample):
@@ -493,25 +578,23 @@ def train():
     print(f"Dataset: {len(dataset)} samples")
 
     # ── GRPO Config ───────────────────────────────────────────────
+    grad_accum = max(1, args.num_generations * (2 if args.fast else 4))
     training_args = GRPOConfig(
         output_dir=args.output,
         max_steps=args.steps,
         num_generations=args.num_generations,       # Completions per prompt for GRPO
-        per_device_train_batch_size=args.num_generations,
-        gradient_accumulation_steps=4,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=grad_accum,
         learning_rate=5e-5,
-        warmup_ratio=0.1,
+        warmup_ratio=0.05,
         lr_scheduler_type="cosine",
         optim="adamw_8bit",
-        fp16=True,
+        fp16=False,
         bf16=False,
-        logging_steps=5,
-        save_steps=50,
-        save_total_limit=3,
+        logging_steps=20 if args.fast else 5,
         report_to="none",                           # Set to "wandb" if you want logging
         max_prompt_length=1024,
-        max_completion_length=512,
-        temperature=0.9,                            # High temp for exploration
+        max_completion_length=args.max_completion_length,
         seed=42,
     )
 
@@ -526,7 +609,6 @@ def train():
 
     # ── Train ─────────────────────────────────────────────────────
     print("\nStarting training...")
-    print(f"Expected time: ~{args.steps * 30 // 60} minutes on A100")
     trainer.train()
 
     # ── Save ──────────────────────────────────────────────────────
@@ -602,6 +684,7 @@ if __name__ == "__main__":
         else:
             train()
     finally:
+        _close_shared_env()
         if server_proc:
             print("Shutting down GENESIS server...")
             server_proc.terminate()

@@ -42,7 +42,8 @@ def install_dependencies():
 
         # 1. Core Simulation & OpenEnv
         print("  [1/3] Installing OpenEnv + server deps...")
-        pip("openenv-core[core]>=0.2.3", "fastapi", "uvicorn", "requests", "fastmcp")
+        # base58 is required by server/proof/solana_client.py even if you never call Solana tools
+        pip("openenv-core[core]>=0.2.3", "fastapi", "uvicorn", "requests", "fastmcp", "base58")
 
         # 2. HF training stack — torch pinned to prevent Triton upgrade
         print("  [2/3] Installing trl / peft / bitsandbytes / accelerate...")
