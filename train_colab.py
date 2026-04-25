@@ -14,24 +14,28 @@ def install_dependencies():
     try:
         import google.colab
         print("Detected Google Colab. Installing dependencies...")
-        
+
+        def pip(*args):
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *args])
+
+        # Colab already has CUDA-enabled PyTorch + Triton — do NOT let pip upgrade them.
+        # Upgrading torch pulls in a newer Triton that generates PTX 8.7, but Colab's T4
+        # CUDA toolkit ptxas only supports up to PTX 8.4 → PTXASError at runtime.
+        import importlib.metadata
+        _torch_pin = f"torch=={importlib.metadata.version('torch')}"
+
         # 1. Core Simulation & OpenEnv
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-        subprocess.check_call([sys.executable, "-m", "pip", "install", 
-                             "openenv-core[core]>=0.2.3", "fastapi", "uvicorn", 
-                             "requests", "numpy", "matplotlib", "pillow"])
-        
-        # 2. CUDA-optimized Torch (Colab default is cu121 usually)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "torch", "torchvision", 
-                             "--index-url", "https://download.pytorch.org/whl/cu121"])
-        
-        # 3. Training Libraries (HuggingFace + Unsloth)
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "trl", "transformers", "datasets"])
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "unsloth"])
-        
-        print("Installation complete. Please RESTART RUNTIME if you see version conflicts.")
+        print("  [1/3] Installing OpenEnv + server deps...")
+        pip("openenv-core[core]>=0.2.3", "fastapi", "uvicorn", "requests")
+
+        # 2. HF training stack — torch pinned to prevent Triton upgrade
+        print("  [2/3] Installing trl / peft / bitsandbytes / accelerate...")
+        pip(_torch_pin, "trl", "peft", "bitsandbytes", "accelerate")
+
+        print("  [3/3] Dependencies complete.")
+
+        print("Installation complete. Restart runtime now if prompted about version conflicts.")
     except ImportError:
-        # Not in Colab, skip automatic installation
         pass
 
 # ── Windows/Colab Triton Mock ─────────────────────────────────────────────────
@@ -107,11 +111,13 @@ class GenesisEnv(MCPToolClient):
 parser = argparse.ArgumentParser(description="Train LLMs on GENESIS startup simulation")
 parser.add_argument("--smoke", action="store_true", help="Run a smoke test without training")
 parser.add_argument("--steps", type=int, default=200, help="Max training steps")
-parser.add_argument("--model", type=str, default="unsloth/Qwen2.5-7B-Instruct-bnb-4bit", help="Model to fine-tune")
+parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-3B-Instruct",
+                    help="Model to fine-tune. 3B fits on a free Colab T4 (15 GB).")
 parser.add_argument("--output", type=str, default="./genesis-checkpoints", help="Output directory")
 parser.add_argument("--difficulty", type=int, default=1, choices=[1, 2, 3, 4, 5])
 parser.add_argument("--episode-days", type=int, default=30)
-parser.add_argument("--num-generations", type=int, default=4)
+parser.add_argument("--num-generations", type=int, default=2,
+                    help="Completions per prompt. 2 is safe on T4; increase to 4 on A100.")
 args, _ = parser.parse_known_args()
 
 # ── Training Helpers ──────────────────────────────────────────────────────────
@@ -175,28 +181,66 @@ def genesis_reward_fn(completions, prompts, **kwargs):
 
 # ── Main Training Loop ────────────────────────────────────────────────────────
 def train():
-    from unsloth import FastLanguageModel
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import get_peft_model, LoraConfig, TaskType
     from trl import GRPOConfig, GRPOTrainer
     from datasets import Dataset
 
     print(f"\nLoading {args.model}...")
-    model, tokenizer = FastLanguageModel.from_pretrained(model_name=args.model, max_seq_length=2048, load_in_4bit=True)
-    model = FastLanguageModel.get_peft_model(model, r=16, target_modules=["q_proj", "k_proj", "v_proj", "o_proj"], lora_alpha=32, use_gradient_checkpointing="unsloth")
+    
+    # 4-bit quantization config
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+    )
+
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model,
+        quantization_config=bnb_config,
+        device_map="auto",
+        torch_dtype=torch.float16,
+    )
+    
+    tokenizer = AutoTokenizer.from_pretrained(args.model)
+    tokenizer.pad_token = tokenizer.eos_token # Standard for Qwen/Llama
+    
+    # LoRA config
+    lora_config = LoraConfig(
+        r=16,
+        lora_alpha=32,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type=TaskType.CAUSAL_LM,
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
 
     print("\nBuilding dataset...")
-    # Minimal dataset for demonstration
     dataset = Dataset.from_list([{"prompt": f"You are the {r}. Day 1. Cash: $100k. What is your action?", "role": r} for r in ROLES] * 20)
 
     training_args = GRPOConfig(
-        output_dir=args.output, max_steps=args.steps, num_generations=args.num_generations,
-        per_device_train_batch_size=1, gradient_accumulation_steps=4, learning_rate=5e-5,
-        bf16=True, logging_steps=5, report_to="none"
+        output_dir=args.output,
+        max_steps=args.steps,
+        num_generations=args.num_generations,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=args.num_generations * 4,
+        learning_rate=5e-5,
+        max_completion_length=256,
+        fp16=False,
+        bf16=False,
+        logging_steps=5,
+        report_to="none",
     )
 
     trainer = GRPOTrainer(model=model, processing_class=tokenizer, args=training_args, train_dataset=dataset, reward_funcs=genesis_reward_fn)
     print("\nStarting training...")
     trainer.train()
     model.save_pretrained(f"{args.output}/final")
+    tokenizer.save_pretrained(f"{args.output}/final")
     print(f"\nTraining complete. Saved to {args.output}/final")
 
 # ── Entry Point ───────────────────────────────────────────────────────────────
