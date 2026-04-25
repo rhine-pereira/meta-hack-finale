@@ -1,0 +1,128 @@
+import os
+import json
+import base58
+from typing import Optional, List, Dict, Any
+from hashlib import sha256
+from dotenv import load_dotenv
+
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+from solders.system_program import ID as SYS_PROG_ID
+from solders.instruction import Instruction, AccountMeta
+from solana.rpc.async_api import AsyncClient
+from solana.rpc.commitment import Confirmed
+from solana.transaction import Transaction
+from solana.rpc.types import TxOpts
+
+# Load env vars
+load_dotenv()
+
+IDL_PATH = os.path.join(os.path.dirname(__file__), "../../blockchain/solana/idl/genesis_proof.json")
+
+class SolanaProofClient:
+    def __init__(self):
+        self.rpc_url = os.getenv("GENESIS_SOLANA_RPC_URL", "https://api.devnet.solana.com")
+        self.program_id_str = os.getenv("GENESIS_SOLANA_PROGRAM_ID")
+        self.keypair_json = os.getenv("GENESIS_SOLANA_KEYPAIR_JSON")
+        self.commitment = os.getenv("GENESIS_SOLANA_COMMITMENT", "confirmed")
+        
+        self.program_id = Pubkey.from_string(self.program_id_str) if self.program_id_str else None
+        self.payer = self._load_keypair()
+        
+    def _load_keypair(self) -> Optional[Keypair]:
+        if not self.keypair_json:
+            return None
+        try:
+            secret = json.loads(self.keypair_json)
+            return Keypair.from_bytes(bytes(secret))
+        except Exception as e:
+            print(f"Error loading Solana keypair: {e}")
+            return None
+
+    def is_configured(self) -> bool:
+        return all([self.program_id, self.payer, self.rpc_url])
+
+    def get_episode_fingerprint(self, episode_id: str, seed: int) -> bytes:
+        """Derives a stable 32-byte fingerprint for an episode."""
+        payload = f"{episode_id}:{seed}".encode('utf-8')
+        return sha256(payload).digest()
+
+    def derive_checkpoint_pda(self, episode_fingerprint: bytes, checkpoint_index: int) -> Pubkey:
+        """Derives the PDA for a specific checkpoint."""
+        seeds = [
+            b"genesis_proof",
+            episode_fingerprint,
+            checkpoint_index.to_bytes(4, 'little')
+        ]
+        pda, _ = Pubkey.find_program_address(seeds, self.program_id)
+        return pda
+
+    async def commit_checkpoint(
+        self,
+        episode_id: str,
+        seed: int,
+        merkle_root: bytes,
+        checkpoint_index: int,
+        day: int,
+        leaf_count: int
+    ) -> Dict[str, Any]:
+        if not self.is_configured():
+            return {"success": False, "error": "Solana not configured in .env"}
+
+        episode_fingerprint = self.get_episode_fingerprint(episode_id, seed)
+        checkpoint_pda = self.derive_checkpoint_pda(episode_fingerprint, checkpoint_index)
+        
+        # Anchor instruction discriminator for "commit_checkpoint"
+        # sighash("global:commit_checkpoint")
+        sighash_input = "global:commit_checkpoint"
+        discriminator = sha256(sighash_input.encode('utf-8')).digest()[:8]
+        
+        # Data layout (Borsh):
+        # episode_fingerprint [u8; 32]
+        # merkle_root [u8; 32]
+        # checkpoint_index u32
+        # day u32
+        # leaf_count u32
+        data = (
+            discriminator +
+            episode_fingerprint +
+            merkle_root +
+            checkpoint_index.to_bytes(4, 'little') +
+            day.to_bytes(4, 'little') +
+            leaf_count.to_bytes(4, 'little')
+        )
+
+        accounts = [
+            AccountMeta(pubkey=checkpoint_pda, is_signer=False, is_writable=True),
+            AccountMeta(pubkey=self.payer.pubkey(), is_signer=True, is_writable=True),
+            AccountMeta(pubkey=SYS_PROG_ID, is_signer=False, is_writable=False),
+        ]
+
+        instruction = Instruction(
+            program_id=self.program_id,
+            data=data,
+            accounts=accounts
+        )
+
+        async with AsyncClient(self.rpc_url) as client:
+            latest_blockhash = (await client.get_latest_blockhash()).value.blockhash
+            
+            tx = Transaction()
+            tx.add(instruction)
+            tx.recent_blockhash = latest_blockhash
+            tx.sign(self.payer)
+            
+            try:
+                # Use standard opts
+                opts = TxOpts(skip_preflight=False, preflight_commitment=Confirmed)
+                res = await client.send_raw_transaction(tx.serialize(), opts)
+                
+                signature = str(res.value)
+                return {
+                    "success": True,
+                    "signature": signature,
+                    "pda": str(checkpoint_pda),
+                    "explorer_url": f"https://explorer.solana.com/tx/{signature}?cluster=devnet"
+                }
+            except Exception as e:
+                return {"success": False, "error": str(e)}

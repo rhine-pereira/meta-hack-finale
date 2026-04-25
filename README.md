@@ -30,12 +30,13 @@ This README is the primary narrative artifact for the submission: it ties the **
 10. [MarketMaker (adaptive curriculum, Theme 4)](#marketmaker-adaptive-curriculum-theme-4)
 11. [Pivots (Wild Card, Theme 5)](#pivots-wild-card-theme-5)
 12. [Reward: 11-component composable rubric](#reward-11-component-composable-rubric)
-13. [Training pipeline (GRPO, reproducibility)](#training-pipeline-grpo-reproducibility)
-14. [OpenEnv compliance](#openenv-compliance)
-15. [Install, run, and develop](#install-run-and-develop)
-16. [Project layout](#project-layout)
-17. [Submission materials and artifacts](#submission-materials-and-artifacts)
-18. [License](#license)
+13. [USP: Founder Genome (LLM Capability Benchmark)](#usp-founder-genome-llm-capability-benchmark)
+14. [Training pipeline (GRPO, reproducibility)](#training-pipeline-grpo-reproducibility)
+15. [OpenEnv compliance](#openenv-compliance)
+16. [Install, run, and develop](#install-run-and-develop)
+17. [Project layout](#project-layout)
+18. [Submission materials and artifacts](#submission-materials-and-artifacts)
+19. [License](#license)
 
 ---
 
@@ -218,6 +219,19 @@ Implemented in `server/reward_engine.py` with **fixed weights** that sum to a si
 
 ---
 
+## USP: Founder Genome (LLM Capability Benchmark)
+
+GENESIS creates a **Founder Assessment Profile** by aggregating performance across multiple episodes. This isn't just a high-score; it's a **behavioral fingerprint** of the LLM’s startup capability.
+
+- **Founder Genome Card:** Every model run can generate an exportable **JSON + PNG** "Genome Card"—a radar chart of the 11 dimensions (Valuation, Series A, Morale, etc.).
+- **Model Comparison:** Head-to-head comparisons (e.g., Claude vs GPT vs Gemini) show relative strengths. One model might be a "Product Visionary" (high velocity, low runway management), while another is a "Risk-Averse Operator" (high runway, low velocity).
+- **Verifiable Benchmark:** Combined with **Blockchain Proofs**, these genomes provide a verifiable way to claim "Model X is better at handling pivot pressure than Model Y."
+
+**Export a Genome:**
+Use the `export_founder_genome(model_id="qwen2.5-7b")` tool to aggregate sessions from `sessions.pkl` and generate artifacts in `exports/founder_genomes/`.
+
+---
+
 ## Training pipeline (GRPO, reproducibility)
 
 | Artifact | Purpose |
@@ -319,7 +333,13 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 ├── train.py              # GRPO training (main script)
 ├── train_colab.py        # Colab-oriented training + install
 ├── colab/training.ipynb  # Colab notebook
-├── scripts/plot_rewards.py
+├── scripts/
+│   ├── plot_rewards.py
+│   └── organize_repo.py  # Repo cleanup (dry-run by default)
+├── tools/
+│   └── dev/              # One-off dev utilities (route listing, validators, etc.)
+├── docs/
+│   └── design.md
 ├── openenv.yaml
 ├── Dockerfile
 ├── context/hackathon_idea_3.md   # full design narrative

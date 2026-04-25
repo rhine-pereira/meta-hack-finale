@@ -1,24 +1,21 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { KpiStrip } from "@/components/dashboard/KpiStrip";
 import { AgentPanel } from "@/components/dashboard/AgentPanel";
 import { EventFeed } from "@/components/dashboard/EventFeed";
 import { RewardPanel } from "@/components/dashboard/RewardPanel";
+import { ProofPanel } from "@/components/dashboard/ProofPanel";
+import { GenomePanel } from "@/components/dashboard/GenomePanel";
 import { useGenesisStore } from "@/lib/store";
 import { motion } from "framer-motion";
-import { Rocket } from "lucide-react";
+import { Rocket, Cpu, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
   const { episodeId, isRunning, reset, difficulty, seed } = useGenesisStore();
-
-  useEffect(() => {
-    // Auto-reset if no session
-    if (!episodeId) {
-      reset(difficulty, seed);
-    }
-  }, [episodeId, reset, difficulty, seed]);
+  const [selectedModel, setSelectedModel] = useState("claude-3-5-sonnet");
 
   if (!episodeId) {
     return (
@@ -26,23 +23,47 @@ export default function Dashboard() {
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="max-w-md w-full glass-panel p-12 text-center rounded-2xl border-accent/20"
+          className="max-w-md w-full glass-panel p-12 rounded-2xl border-accent/20"
         >
           <div className="w-16 h-16 bg-accent/10 border border-accent/30 rounded-full flex items-center justify-center mx-auto mb-6">
             <Rocket className="text-accent animate-pulse" size={32} />
           </div>
-          <h1 className="text-3xl font-black text-accent mb-2 tracking-tighter uppercase font-mono">GENESIS</h1>
-          <p className="text-text-secondary text-sm mb-8 font-medium">The Autonomous Startup Gauntlet</p>
-          <div className="space-y-4">
-             <div className="text-xs text-text-muted font-mono animate-pulse">Initializing Neural Interface...</div>
-             <div className="h-1 w-full bg-border-dim rounded-full overflow-hidden">
-                <motion.div 
-                  initial={{ width: 0 }}
-                  animate={{ width: "100%" }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  className="h-full bg-accent"
-                />
-             </div>
+          <h1 className="text-3xl font-black text-accent mb-2 tracking-tighter uppercase font-mono text-center">GENESIS</h1>
+          <p className="text-text-secondary text-sm mb-8 font-medium text-center">The Autonomous Startup Gauntlet</p>
+          
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em]">Select Founder Persona</label>
+              <div className="grid grid-cols-1 gap-2">
+                {[
+                  { id: "claude-3-5-sonnet", label: "Anthropic Claude 3.5 Sonnet", icon: Cpu },
+                  { id: "gpt-4o", label: "OpenAI GPT-4o", icon: Cpu },
+                  { id: "gemini-1.5-pro", label: "Google Gemini 1.5 Pro", icon: Cpu },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setSelectedModel(m.id)}
+                    className={cn(
+                      "flex items-center gap-3 p-3 rounded-xl border transition-all text-left",
+                      selectedModel === m.id 
+                        ? "bg-accent/10 border-accent text-accent shadow-[0_0_15px_rgba(45,212,191,0.1)]" 
+                        : "bg-bg-void/40 border-border-dim text-text-muted hover:border-accent/30"
+                    )}
+                  >
+                    <m.icon size={16} />
+                    <span className="text-xs font-mono font-bold uppercase">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button 
+              onClick={() => reset(difficulty, seed, selectedModel)}
+              className="w-full py-4 bg-accent text-bg-void font-black text-xs uppercase tracking-[0.3em] rounded-xl hover:bg-accent-glow transition-all flex items-center justify-center gap-2 group"
+            >
+              Initialize Neural Bridge
+              <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
+            </button>
           </div>
         </motion.div>
       </div>
@@ -63,8 +84,16 @@ export default function Dashboard() {
             <EventFeed />
           </div>
           
-          <div className="lg:col-span-3 h-full overflow-hidden">
-            <RewardPanel />
+          <div className="lg:col-span-3 h-full flex flex-col gap-6 overflow-hidden">
+            <div className="h-[250px] shrink-0">
+              <RewardPanel />
+            </div>
+            <div className="flex-1 min-h-0">
+              <GenomePanel />
+            </div>
+            <div className="h-fit">
+              <ProofPanel />
+            </div>
           </div>
         </div>
       </div>

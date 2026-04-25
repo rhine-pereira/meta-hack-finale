@@ -15,3 +15,10 @@ transformers
 trl
 datasets
 unsloth
+
+# Solana & Blockchain
+solana
+solders
+anchorpy
+python-dotenv
+base58
