@@ -7,7 +7,8 @@ import os
 import pickle
 import random
 import uuid
-from typing import Dict
+from typing import Dict, List, Any
+from datetime import datetime
 from fastmcp import FastMCP
 
 from .world_state import WorldState, DifficultyLevel, AgentRole
@@ -15,6 +16,10 @@ from .world_init import initialize_world
 from .event_engine import tick_day
 from .reward_engine import compute_reward
 from .market_maker import MarketMaker
+from .proof.canonical import hash_state
+from .proof.merkle import sha256_leaf, build_merkle_root
+from .proof.solana_client import SolanaProofClient
+from .genome_utils import aggregate_genome, generate_radar_chart, generate_comparison_chart
 
 # ── Global Registry ──────────────────────────────────────────────────────────
 from fastapi import Request
@@ -102,7 +107,8 @@ def _execute_pivot(state: WorldState, new_direction: str, rationale: str) -> Non
 # ── Tasks 1 & 2: Session Lifecycle ───────────────────────────────────────────
 
 @mcp.tool()
-def reset(episode_id: str, difficulty: int = 4, seed: int = 42) -> dict:
+def reset(episode_id: str, difficulty: int = 4, seed: int = 42, 
+          model_id: str = None, model_provider: str = None, model_version: str = None) -> dict:
     """
     Initialize or reset a startup simulation episode.
     
@@ -110,6 +116,9 @@ def reset(episode_id: str, difficulty: int = 4, seed: int = 42) -> dict:
         episode_id: Unique identifier for the session.
         difficulty: 1 (Tutorial) to 5 (Nightmare). Default is 4 (Gauntlet).
         seed: Random seed for reproducibility.
+        model_id: (USP3) Identifier for the model being benchmarked.
+        model_provider: (USP3) Optional provider name.
+        model_version: (USP3) Optional model version.
     """
     # Map int difficulty to Enum
     try:
@@ -121,6 +130,14 @@ def reset(episode_id: str, difficulty: int = 4, seed: int = 42) -> dict:
     state = initialize_world(difficulty=diff_enum, seed=seed)
     # Ensure episode_id matches requested ID
     state.episode_id = episode_id
+    state.seed = seed
+    state.model_id = model_id
+    state.model_provider = model_provider
+    state.model_version = model_version
+    
+    # Initialize proof with Day 0 state
+    day0_hash = hash_state(state)
+    state.proof_leaves = [sha256_leaf(day0_hash).hex()]
     
     SESSIONS[episode_id] = state
     RNGS[episode_id] = random.Random(seed)
@@ -213,6 +230,11 @@ def get_daily_briefing(episode_id: str, agent_role: str) -> dict:
     score = compute_reward(state)
     state.cumulative_reward = score.total
     state.reward_history.append(score.total)
+    state.reward_breakdown_history.append(score.breakdown())
+    
+    # Update proof leaves
+    current_hash = hash_state(state)
+    state.proof_leaves.append(sha256_leaf(current_hash).hex())
     
     # Persistent update
     save_sessions()
@@ -1178,6 +1200,87 @@ def hold_one_on_one(episode_id: str, agent_role: str, employee_id: str, talking_
         "message": f"1-on-1 with {emp.name} completed."
     }
 
+# ── Task 9: Founder Genome (USP 3) ───────────────────────────────────────────
+
+@mcp.tool()
+def export_founder_genome(model_id: str, difficulty: int = None) -> dict:
+    """
+    Aggregate episode data for a model and export its Founder Genome card (JSON + PNG).
+    
+    Args:
+        model_id: Identifier of the model to aggregate.
+        difficulty: Optional filter for simulation difficulty.
+    """
+    states = [s for s in SESSIONS.values() if s.model_id == model_id]
+    if difficulty:
+        states = [s for s in states if int(s.difficulty) == difficulty]
+    
+    if not states:
+        return {"error": f"No sessions found for model '{model_id}'."}
+    
+    genome = aggregate_genome(states)
+    if not genome:
+        return {"error": "No reward breakdown history found in sessions."}
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    export_dir = "exports/founder_genomes"
+    json_path = f"{export_dir}/genome_{model_id}_{timestamp}.json"
+    png_path = f"{export_dir}/genome_{model_id}_{timestamp}.png"
+    
+    os.makedirs(export_dir, exist_ok=True)
+    
+    with open(json_path, "w") as f:
+        json.dump(genome, f, indent=2)
+    
+    generate_radar_chart(genome, model_id, png_path)
+    
+    return {
+        "model_id": model_id,
+        "genome": genome,
+        "artifacts": {
+            "json": json_path,
+            "png": png_path
+        }
+    }
+
+@mcp.tool()
+def compare_founder_genomes(model_ids: List[str]) -> dict:
+    """
+    Compare multiple models and export a combined comparison card.
+    
+    Args:
+        model_ids: List of model identifiers to compare.
+    """
+    comparison = {}
+    valid_ids = []
+    
+    for mid in model_ids:
+        states = [s for s in SESSIONS.values() if s.model_id == mid]
+        if not states:
+            continue
+        genome = aggregate_genome(states)
+        if genome:
+            comparison[mid] = genome
+            valid_ids.append(mid)
+    
+    if not comparison:
+        return {"error": "No valid genomes found for comparison."}
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    export_dir = "exports/founder_genomes"
+    comparison_id = "_vs_".join(valid_ids[:3]) # Limit name length
+    png_path = f"{export_dir}/comparison_{comparison_id}_{timestamp}.png"
+    
+    generate_comparison_chart(comparison, png_path)
+    
+    return {
+        "compared_models": valid_ids,
+        "comparison": comparison,
+        "artifacts": {
+            "png": png_path
+        }
+    }
+
 # ── Reward Endpoint ───────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -1204,6 +1307,83 @@ def get_reward(episode_id: str) -> dict:
         "cumulative": state.cumulative_reward,
         "history_length": len(state.reward_history),
         "is_done": state.is_done(),
+    }
+
+# ── Task 10: Blockchain & Proofs ───────────────────────────────────────────
+
+@mcp.tool()
+async def commit_simulation_proof(episode_id: str, dry_run: bool = False) -> dict:
+    """
+    Compute the Merkle root of all state hashes so far and commit it to Solana.
+    This creates a tamper-evident, verifiable proof of the simulation's integrity.
+    
+    Args:
+        episode_id: Unique identifier for the session.
+        dry_run: If true, compute the root but don't send the transaction.
+    """
+    state = _get_state(episode_id)
+    
+    if not state.proof_leaves:
+        return {"success": False, "error": "No state hashes recorded yet."}
+    
+    # Convert hex leaves back to bytes
+    leaf_bytes = [bytes.fromhex(l) for l in state.proof_leaves]
+    merkle_root = build_merkle_root(leaf_bytes)
+    
+    client = SolanaProofClient()
+    
+    if dry_run:
+        episode_fingerprint = client.get_episode_fingerprint(state.episode_id, state.seed)
+        pda = client.derive_checkpoint_pda(episode_fingerprint, state.last_checkpoint_index)
+        return {
+            "success": True,
+            "dry_run": True,
+            "merkle_root_hex": merkle_root.hex(),
+            "leaf_count": len(state.proof_leaves),
+            "checkpoint_index": state.last_checkpoint_index,
+            "pda": str(pda),
+            "day": state.day
+        }
+    
+    # Execute on-chain commit
+    result = await client.commit_checkpoint(
+        episode_id=state.episode_id,
+        seed=state.seed,
+        merkle_root=merkle_root,
+        checkpoint_index=state.last_checkpoint_index,
+        day=state.day,
+        leaf_count=len(state.proof_leaves)
+    )
+    
+    if result.get("success"):
+        state.last_onchain_signature = result["signature"]
+        state.last_checkpoint_index += 1
+        save_sessions()
+        
+    return result
+
+@mcp.tool()
+def get_simulation_proof_status(episode_id: str) -> dict:
+    """
+    Get the current status of on-chain verifiable proofs for this simulation.
+    
+    Args:
+        episode_id: Unique identifier for the session.
+    """
+    state = _get_state(episode_id)
+    
+    client = SolanaProofClient()
+    episode_fingerprint = client.get_episode_fingerprint(state.episode_id, state.seed)
+    
+    return {
+        "episode_id": state.episode_id,
+        "day": state.day,
+        "leaf_count": len(state.proof_leaves),
+        "last_checkpoint_index": state.last_checkpoint_index,
+        "last_signature": state.last_onchain_signature,
+        "explorer_url": f"https://explorer.solana.com/tx/{state.last_onchain_signature}?cluster=devnet" if state.last_onchain_signature else None,
+        "is_solana_configured": client.is_configured(),
+        "episode_fingerprint_hex": episode_fingerprint.hex()
     }
 
 # ── ASGI Bridge ─────────────────────────────────────────────────────────────

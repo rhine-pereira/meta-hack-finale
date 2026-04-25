@@ -115,6 +115,11 @@ class WorldState:
     difficulty: DifficultyLevel = DifficultyLevel.GAUNTLET
     max_days: int = 540
 
+    # ── Model Metadata (USP3) ─────────────────────────────────────
+    model_id: Optional[str] = None
+    model_provider: Optional[str] = None
+    model_version: Optional[str] = None
+
     # ── Company financials ────────────────────────────────────────
     cash: float = 500_000.0          # Starting capital (seed)
     burn_rate_daily: float = 5_000.0 # ~$150k/month burn
@@ -180,6 +185,7 @@ class WorldState:
     # ── Reward tracking ───────────────────────────────────────────
     cumulative_reward: float = 0.0
     reward_history: list[float] = field(default_factory=list)
+    reward_breakdown_history: list[dict[str, float]] = field(default_factory=list)
     milestone_scores: dict[str, float] = field(default_factory=dict)
 
     # ── Curriculum metadata ───────────────────────────────────────
@@ -192,6 +198,12 @@ class WorldState:
 
     # ── MarketMaker persistence ───────────────────────────────────
     market_maker_weaknesses: list[str] = field(default_factory=list)
+
+    # ── Blockchain / Proofs ───────────────────────────────────────
+    seed: int = 42
+    proof_leaves: list[str] = field(default_factory=list) # List of hex leaf hashes
+    last_checkpoint_index: int = 0
+    last_onchain_signature: Optional[str] = None
 
     def runway_days(self) -> float:
         daily_revenue = self.mrr / 30.0

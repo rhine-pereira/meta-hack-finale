@@ -108,4 +108,35 @@ export interface WorldState {
   pivot_count: number;
   pivot_in_progress: boolean;
   pivot_direction: string | null;
+  model_id: string | null;
+  reward_breakdown_history: RewardBreakdown[];
+}
+
+export interface FounderGenome {
+  profile: Record<string, number>;
+  metadata: {
+    episode_count: number;
+    avg_difficulty: number;
+    avg_days_survived: number;
+    strengths: string[];
+    weaknesses: string[];
+    timestamp: string;
+  };
+}
+
+export interface GenomeExport {
+  model_id: string;
+  genome: FounderGenome;
+  artifacts: {
+    json: string;
+    png: string;
+  };
+}
+
+export interface ComparisonExport {
+  compared_models: string[];
+  comparison: Record<string, FounderGenome>;
+  artifacts: {
+    png: string;
+  };
 }

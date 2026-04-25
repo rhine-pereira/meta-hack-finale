@@ -8,7 +8,10 @@ import {
   PendingFeature, 
   PersonalCrisis, 
   RewardBreakdown, 
-  GameEvent 
+  GameEvent,
+  FounderGenome,
+  GenomeExport,
+  ComparisonExport
 } from "@/types/genesis";
 import { genesisClient } from "./genesis-client";
 
@@ -67,12 +70,29 @@ interface GenesisStore {
   pivotInProgress: boolean;
   pivotDirection: string | null;
 
+  // Blockchain / Proof
+  lastSignature: string | null;
+  leafCount: number;
+  checkpointIndex: number;
+  isSolanaConfigured: boolean;
+
+  // Founder Genome (USP 3)
+  modelId: string | null;
+  genomes: Record<string, FounderGenome>;
+  comparison: ComparisonExport | null;
+
   // Actions
   setServerOnline: (online: boolean) => void;
-  reset: (difficulty: number, seed: number) => Promise<void>;
+  reset: (difficulty: number, seed: number, modelId?: string) => Promise<void>;
   advanceDay: () => Promise<void>;
   fetchState: () => Promise<void>;
   fetchReward: () => Promise<void>;
+  commitProof: () => Promise<void>;
+  fetchProofStatus: () => Promise<void>;
+  
+  // Genome Actions
+  exportGenome: (modelId: string) => Promise<GenomeExport>;
+  compareGenomes: (modelIds: string[]) => Promise<ComparisonExport>;
   
   // Helpers
   runwayDays: () => number;
@@ -121,18 +141,33 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
   pivotInProgress: false,
   pivotDirection: null,
 
+  lastSignature: null,
+  leafCount: 0,
+  checkpointIndex: 0,
+  isSolanaConfigured: false,
+
+  modelId: null,
+  genomes: {},
+  comparison: null,
+
   // Actions
   setServerOnline: (online) => set({ serverOnline: online }),
 
-  reset: async (difficulty, seed) => {
+  reset: async (difficulty, seed, modelId = "genesis-alpha") => {
     const episodeId = `ep-${Math.random().toString(36).substring(2, 9)}`;
     try {
-      const result = await genesisClient.callTool("reset", { episode_id: episodeId, difficulty, seed });
+      const result = await genesisClient.callTool("reset", { 
+        episode_id: episodeId, 
+        difficulty, 
+        seed,
+        model_id: modelId
+      });
       
       set({
         episodeId,
         difficulty,
         seed,
+        modelId,
         day: result.day,
         maxDays: result.max_days,
         cash: result.cash,
@@ -143,6 +178,7 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
 
       await get().fetchState();
       await get().fetchReward();
+      await get().fetchProofStatus();
     } catch (error) {
       console.error("Reset failed:", error);
     }
@@ -175,6 +211,7 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
 
       await get().fetchState();
       await get().fetchReward();
+      await get().fetchProofStatus();
     } catch (error) {
       console.error("Advance day failed:", error);
     }
@@ -240,6 +277,63 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       });
     } catch (error) {
       console.error("Fetch reward failed:", error);
+    }
+  },
+
+  commitProof: async () => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+
+    try {
+      const result = await genesisClient.callTool("commit_simulation_proof", { episode_id: episodeId });
+      if (result.success) {
+        await get().fetchProofStatus();
+      } else {
+        console.error("Commit proof failed:", result.error);
+      }
+    } catch (error) {
+      console.error("Commit proof error:", error);
+    }
+  },
+
+  fetchProofStatus: async () => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+
+    try {
+      const result = await genesisClient.callTool("get_simulation_proof_status", { episode_id: episodeId });
+      set({
+        lastSignature: result.last_signature,
+        leafCount: result.leaf_count,
+        checkpointIndex: result.last_checkpoint_index,
+        isSolanaConfigured: result.is_solana_configured
+      });
+    } catch (error) {
+      console.error("Fetch proof status failed:", error);
+    }
+  },
+
+  exportGenome: async (modelId: string) => {
+    try {
+      const result = await genesisClient.callTool("export_founder_genome", { model_id: modelId });
+      set((state) => ({
+        genomes: { ...state.genomes, [modelId]: result.genome }
+      }));
+      return result;
+    } catch (error) {
+      console.error("Export genome failed:", error);
+      throw error;
+    }
+  },
+
+  compareGenomes: async (modelIds: string[]) => {
+    try {
+      const result = await genesisClient.callTool("compare_founder_genomes", { model_ids: modelIds });
+      set({ comparison: result });
+      return result;
+    } catch (error) {
+      console.error("Compare genomes failed:", error);
+      throw error;
     }
   },
 

@@ -65,6 +65,8 @@ export const TopBar = () => {
           <nav className="hidden md:flex items-center gap-4 font-mono tracking-tighter uppercase text-xs">
             {[
               { label: "Dashboard", href: "/" },
+              { label: "Benchmark", href: "/benchmark" },
+              { label: "Training", href: "/training" },
               { label: "Financials", href: "/financials" },
               { label: "Product", href: "/product" },
               { label: "Team", href: "/team" },

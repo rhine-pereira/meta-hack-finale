@@ -1,2 +1,19 @@
-server/__pycache__
-server/__init__.py
+## Python caches / venvs
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+
+## Local training artifacts
+sessions.pkl
+*.pkl
+genesis-checkpoints/
+
+## OS / editor
+.DS_Store
+Thumbs.db
+
+## Keep server package init tracked
+!server/__init__.py
