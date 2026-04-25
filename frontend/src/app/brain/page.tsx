@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
@@ -20,8 +21,15 @@ import {
 
 export default function Brain() {
   const { 
-    companyBrain, employees 
+    companyBrain, employees, injectMemory
   } = useGenesisStore();
+
+  const handleInjectMemory = () => {
+    const key = prompt("Memory Key?", "strategic_pivot_2026");
+    const value = prompt("Memory Value?", "Focus on vertical integration of AI agents.");
+    if (!key || !value) return;
+    injectMemory(key, value);
+  };
 
   const [search, setSearch] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -40,7 +48,11 @@ export default function Brain() {
              <p className="text-text-secondary text-sm">Central repository for shared strategic memory and agent directives.</p>
            </div>
            <div className="flex gap-2">
-              <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)]">
+              <BackToDashboard />
+              <button 
+                onClick={handleInjectMemory}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-glow transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)]"
+              >
                 <PlusCircle size={16} />
                 Inject Memory
               </button>

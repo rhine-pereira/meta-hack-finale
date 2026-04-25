@@ -3,6 +3,7 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { formatCurrency, cn } from "@/lib/utils";
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -13,7 +14,7 @@ import { TrendingUp, TrendingDown, DollarSign, PieChart, Landmark } from "lucide
 
 export default function Financials() {
   const { 
-    cash, mrr, burnRateDaily, investors, episodeId, runwayDays 
+    cash, mrr, burnRateDaily, investors, episodeId, runwayDays, negotiateWithInvestor
   } = useGenesisStore();
 
   // Mock data for charts - in real app this would come from store history
@@ -34,6 +35,7 @@ export default function Financials() {
              <p className="text-text-secondary text-sm">Liquidity management and investor relations surveillance.</p>
            </div>
            <div className="flex gap-2">
+              <BackToDashboard />
               <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors">
                 Recalculate Model
               </button>
@@ -158,8 +160,11 @@ export default function Financials() {
                                 </div>
                              </div>
 
-                             <button className="w-full mt-4 py-1.5 rounded border border-border-dim text-[10px] font-bold uppercase text-text-secondary hover:text-accent hover:border-accent/50 transition-all">
-                                Negotiate
+                             <button 
+                               onClick={() => negotiateWithInvestor(inv.id, valuation, 0.1)}
+                               className="w-full mt-4 py-1.5 rounded border border-border-dim text-[10px] font-bold uppercase text-text-secondary hover:text-accent hover:border-accent/50 transition-all"
+                             >
+                               Negotiate
                              </button>
                           </motion.div>
                        ))

@@ -3,6 +3,7 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
@@ -19,8 +20,15 @@ import {
 
 export default function Product() {
   const { 
-    productMaturity, techDebt, featuresShipped, uptime, pendingFeatures 
+    productMaturity, techDebt, featuresShipped, uptime, pendingFeatures,
+    buildFeature 
   } = useGenesisStore();
+
+  const handleBuildFeature = () => {
+    const name = prompt("Feature Name?", "Autonomous Scale Engine");
+    if (!name) return;
+    buildFeature(name, "medium", 1);
+  };
 
   const statuses = [
     { label: "Pending", items: pendingFeatures.filter(f => f.days_remaining > 0 && f.engineers_assigned === 0) },
@@ -37,7 +45,11 @@ export default function Product() {
              <p className="text-text-secondary text-sm">Engineering velocity and system architecture integrity.</p>
            </div>
            <div className="flex gap-2">
-              <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2">
+              <BackToDashboard />
+              <button 
+                onClick={handleBuildFeature}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-glow transition-colors flex items-center gap-2"
+              >
                 <PlusSquare size={16} />
                 Build Feature
               </button>

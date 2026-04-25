@@ -27,10 +27,13 @@ export const TopBar = () => {
     episodeId, 
     serverOnline, 
     setServerOnline,
-    companyBrain 
+    companyBrain,
+    personalCrises 
   } = useGenesisStore();
   
   const pathname = usePathname();
+
+  const activeCrisesCount = personalCrises.filter(c => !c.resolved && !c.ignored).length;
 
   useEffect(() => {
     const checkServer = async () => {
@@ -72,18 +75,24 @@ export const TopBar = () => {
               { label: "Team", href: "/team" },
               { label: "Market", href: "/market" },
               { label: "Brain", href: "/brain" },
+              { label: "Crises", href: "/crises", badge: activeCrisesCount > 0 ? activeCrisesCount : null },
             ].map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "px-2 pb-1 transition-all duration-200 border-b-2",
+                  "px-2 pb-1 transition-all duration-200 border-b-2 relative",
                   pathname === link.href 
                     ? "text-accent border-accent font-bold" 
                     : "text-text-secondary border-transparent font-medium hover:text-text-primary hover:bg-accent/10"
                 )}
               >
                 {link.label}
+                {link.badge && (
+                  <span className="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-signal-red text-[10px] font-black text-white animate-pulse">
+                    {link.badge}
+                  </span>
+                )}
               </Link>
             ))}
           </nav>

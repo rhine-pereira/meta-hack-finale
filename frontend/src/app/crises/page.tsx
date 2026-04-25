@@ -3,6 +3,7 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
@@ -19,7 +20,7 @@ import {
 
 export default function Crises() {
   const { 
-    personalCrises, eventLog 
+    personalCrises, eventLog, handleCrisis
   } = useGenesisStore();
 
   const activeCrises = personalCrises.filter(c => !c.resolved && !c.ignored);
@@ -35,6 +36,7 @@ export default function Crises() {
              <p className="text-text-secondary text-sm">Critical event surveillance and crisis mitigation management.</p>
            </div>
            <div className="flex gap-2">
+              <BackToDashboard />
               <button className="px-4 py-2 rounded bg-signal-red/10 border border-signal-red/30 text-signal-red font-bold text-xs uppercase tracking-widest hover:bg-signal-red/20 transition-all flex items-center gap-2">
                 <Emergency size={16} />
                 Override All
@@ -119,7 +121,12 @@ export default function Crises() {
                           </div>
 
                           <div className="flex gap-3">
-                             <button className="bg-accent text-bg-void font-black text-[10px] uppercase tracking-widest px-6 py-2.5 rounded hover:shadow-[0_0_20px_rgba(45,212,191,0.4)] transition-all">Intervene Now</button>
+                             <button 
+                               onClick={() => handleCrisis(crisis.id, "I understand the situation and have a plan to resolve it immediately.")}
+                               className="bg-accent text-bg-void font-black text-[10px] uppercase tracking-widest px-6 py-2.5 rounded hover:shadow-[0_0_20px_rgba(45,212,191,0.4)] transition-all"
+                             >
+                               Intervene Now
+                             </button>
                              <button className="bg-bg-void border border-border-dim text-text-primary font-black text-[10px] uppercase tracking-widest px-6 py-2.5 rounded hover:bg-bg-hover transition-all">Delegate Role</button>
                           </div>
                        </motion.div>

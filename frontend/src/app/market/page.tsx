@@ -3,6 +3,7 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { formatCurrency, cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
@@ -19,8 +20,12 @@ import {
 
 export default function Market() {
   const { 
-    customers, competitors, mrr 
+    customers, competitors, mrr, analyzeMarket
   } = useGenesisStore();
+
+  const handleAnalyzeMarket = () => {
+    analyzeMarket("Enterprise SaaS");
+  };
 
   const totalArr = mrr * 12;
 
@@ -33,11 +38,15 @@ export default function Market() {
              <p className="text-text-secondary text-sm">Real-time surveillance of customer health and competitor vectors.</p>
            </div>
            <div className="flex gap-2">
+              <BackToDashboard />
               <button className="px-4 py-2 rounded glass-panel text-text-primary border border-border-dim font-bold text-xs uppercase tracking-widest hover:border-accent/50 hover:bg-accent/5 transition-all flex items-center gap-2">
                 <Mail size={16} />
                 Email Customer
               </button>
-              <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)]">
+              <button 
+                onClick={handleAnalyzeMarket}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-glow transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)]"
+              >
                 <Search size={16} />
                 Analyze Market
               </button>
