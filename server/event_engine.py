@@ -164,16 +164,37 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
         if state.day % 14 == 0:
             inv.sentiment = max(0.0, inv.sentiment - 0.03)
 
-    # ── 9. Market adversary (escalation at higher difficulties) ───────
+    # ── 9. MarketMaker integration (adaptive adversary) ─────────────
+    from .market_maker import MarketMaker
+    mm = MarketMaker(state, rng)
+    mm.observe_performance(0)  # State-based weakness detection
+    mm.generate_investor_sentiment_shift()
+    mm.generate_customer_demand_shift()
+
+    # At milestones, escalate difficulty via MarketMaker
+    if state.day in milestones:
+        escalation = mm.escalate_difficulty()
+        for shock in escalation.get("market_shocks", []):
+            desc = shock.get("description", "Unknown market shift")
+            events.append(f"Market shift: {desc}")
+            for inv in state.investors:
+                inv.sentiment = max(0.0, inv.sentiment - 0.10)
+        for challenge in escalation.get("new_challenges", []):
+            desc = challenge.get("description", challenge.get("type", "unknown"))
+            events.append(f"New challenge: {desc}")
+
+    # High-difficulty periodic shocks (in addition to MarketMaker)
     if state.difficulty.value >= 4 and state.day % 60 == 0:
         shock_events = [
-            "💸 Funding winter hit: VCs pausing new investments for 60 days",
-            "📰 Negative press cycle — enterprise buyers on hold",
-            "🏦 Banking sector stress — payment processing delays for customers",
+            "Funding winter hit: VCs pausing new investments for 60 days",
+            "Negative press cycle - enterprise buyers on hold",
+            "Banking sector stress - payment processing delays for customers",
         ]
         shock = rng.choice(shock_events)
-        events.append(f"🌩️ Market shock: {shock}")
+        events.append(f"Market shock: {shock}")
         for inv in state.investors:
             inv.sentiment = max(0.0, inv.sentiment - 0.15)
+
+    mm.persist_weaknesses()
 
     return events

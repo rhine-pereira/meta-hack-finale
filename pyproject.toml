@@ -24,9 +24,14 @@ dev = [
 ]
 
 [project.scripts]
-server = "genesis_env.server.app:main"
+server = "server.app:mcp.run"
 
 [tool.setuptools]
 include-package-data = true
 packages = ["genesis_env", "genesis_env.server"]
 package-dir = { "genesis_env" = ".", "genesis_env.server" = "server" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"
