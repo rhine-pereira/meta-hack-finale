@@ -205,6 +205,12 @@ class WorldState:
     last_checkpoint_index: int = 0
     last_onchain_signature: Optional[str] = None
 
+    # ── Dead Startup Resurrection Engine ─────────────────────────────
+    postmortem_scenario_id: Optional[str] = None
+    postmortem_fork_points: list[dict] = field(default_factory=list)
+    postmortem_triggered_forks: list[dict] = field(default_factory=list)
+    ai_decisions_at_forks: list[dict] = field(default_factory=list)
+
     def runway_days(self) -> float:
         daily_revenue = self.mrr / 30.0
         net_burn = self.burn_rate_daily - daily_revenue
