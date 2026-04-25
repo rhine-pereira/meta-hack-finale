@@ -10,7 +10,11 @@ Example:
     ...     print(result)
 """
 
+import json
+from typing import Any, Dict, List, Optional
+
 from openenv.core.mcp_client import MCPToolClient
+from openenv.core.env_server.mcp_types import Tool
 
 
 class GenesisEnv(MCPToolClient):
@@ -42,4 +46,145 @@ class GenesisEnv(MCPToolClient):
         ... finally:
         ...     env.close()
     """
-    pass  # MCPToolClient provides all needed functionality
+    def __init__(
+        self,
+        base_url: str,
+        connect_timeout_s: float = 10.0,
+        message_timeout_s: float = 60.0,
+        provider: Optional[Any] = None,
+        mode: Optional[str] = None,
+    ):
+        super().__init__(
+            base_url=base_url,
+            connect_timeout_s=connect_timeout_s,
+            message_timeout_s=message_timeout_s,
+            provider=provider,
+            mode=mode,
+        )
+        self._stateful_session_id: Optional[str] = None
+
+    def _parse_mcp_response(self, raw_text: str) -> Dict[str, Any]:
+        """Parse JSON-RPC from either raw JSON or SSE-framed payloads."""
+        text = raw_text.strip()
+        if not text:
+            raise RuntimeError("Empty response from MCP server")
+
+        if text.startswith("{"):
+            return json.loads(text)
+
+        data_lines = []
+        for line in text.splitlines():
+            if line.startswith("data:"):
+                data_lines.append(line[len("data:") :].strip())
+
+        if not data_lines:
+            raise RuntimeError(f"Unable to parse MCP response: {text[:200]}")
+
+        return json.loads(data_lines[-1])
+
+    async def _stateful_mcp_request(
+        self, method: str, params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Send a JSON-RPC request to FastMCP's stateful /mcp endpoint."""
+        client = await self._get_http_client()
+        headers = {
+            "accept": "application/json, text/event-stream",
+        }
+        if self._stateful_session_id:
+            headers["mcp-session-id"] = self._stateful_session_id
+
+        response = await client.post(
+            self._production_mcp_url(),
+            json={
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": params or {},
+                "id": self._next_request_id(),
+            },
+            headers=headers,
+            timeout=self._message_timeout,
+        )
+        response.raise_for_status()
+
+        new_session_id = response.headers.get("mcp-session-id")
+        if new_session_id:
+            self._stateful_session_id = new_session_id
+
+        return self._parse_mcp_response(response.text)
+
+    async def _ensure_stateful_session(self) -> None:
+        if self._stateful_session_id:
+            return
+
+        data = await self._stateful_mcp_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "genesis-env-client",
+                    "version": "0.1.0",
+                },
+            },
+        )
+        if "error" in data:
+            message = data.get("error", {}).get("message", "unknown error")
+            raise RuntimeError(f"Failed to initialize MCP session: {message}")
+
+    async def list_tools(self, use_cache: bool = True) -> List[Tool]:
+        if use_cache and self._tools_cache is not None:
+            return self._tools_cache
+
+        await self._ensure_stateful_session()
+        data = await self._stateful_mcp_request("tools/list", {})
+        if "error" in data:
+            message = data.get("error", {}).get("message", "unknown error")
+            raise RuntimeError(f"list_tools failed: {message}")
+
+        tools_data = data.get("result", {}).get("tools", [])
+        tools = [
+            Tool(
+                name=t.get("name", ""),
+                description=t.get("description", ""),
+                input_schema=t.get("inputSchema", t.get("input_schema", {})),
+            )
+            for t in tools_data
+        ]
+        self._tools_cache = tools
+        return tools
+
+    async def call_tool(self, name: str, **kwargs: Any) -> Any:
+        await self._ensure_stateful_session()
+        data = await self._stateful_mcp_request(
+            "tools/call",
+            {
+                "name": name,
+                "arguments": kwargs,
+            },
+        )
+
+        if "error" in data:
+            message = data.get("error", {}).get("message", "unknown error")
+            raise RuntimeError(f"Tool '{name}' failed: {message}")
+
+        result = data.get("result", {})
+        if isinstance(result, dict):
+            if result.get("isError"):
+                raise RuntimeError(f"Tool '{name}' returned an error response")
+
+            if "structuredContent" in result:
+                return result["structuredContent"]
+
+            content = result.get("content")
+            if isinstance(content, list) and content:
+                text = content[0].get("text") if isinstance(content[0], dict) else None
+                if isinstance(text, str):
+                    try:
+                        return json.loads(text)
+                    except json.JSONDecodeError:
+                        return text
+
+            if "data" in result:
+                return result["data"]
+
+        return result

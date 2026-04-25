@@ -467,12 +467,21 @@ def fire_employee(episode_id: str, agent_role: str, employee_id: str, severance:
     """
     if agent_role not in ("ceo", "people"):
         return {"error": "Unauthorized. Only the CEO and Head of People can fire employees."}
-    
+
+    import uuid
+
     state = _get_state(episode_id)
     emp = next((e for e in state.employees if e.id == employee_id), None)
     
     if not emp:
         return {"error": f"Employee {employee_id} not found."}
+
+    if emp.skill_level >= 0.75:
+        knowledge_loss = "high"
+    elif emp.skill_level >= 0.45:
+        knowledge_loss = "medium"
+    else:
+        knowledge_loss = "low"
     
     state.employees.remove(emp)
     
