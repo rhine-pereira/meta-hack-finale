@@ -15,6 +15,45 @@ from .world_state import WorldState, PersonalCrisis, Employee
 from .world_init import PERSONAL_CRISIS_TEMPLATES
 
 
+def _inject_postmortem_forks(state: WorldState, events: list[str]) -> None:
+    """
+    Check if any PostmortemScenario ForkPoints are due today and surface them
+    as PersonalCrisis events so agents receive and respond to them.
+    """
+    if not state.postmortem_fork_points:
+        return
+
+    still_pending = []
+    for fork in state.postmortem_fork_points:
+        if state.day >= fork["day"]:
+            # Surface as a personal crisis for the target role
+            crisis = PersonalCrisis(
+                id=str(uuid.uuid4()),
+                target_role=fork["target_role"],
+                description=(
+                    f"[HISTORICAL FORK] {fork['title']}\n\n"
+                    f"{fork['context']}\n\n"
+                    f"⚠️ HISTORICAL CONTEXT: Real founders faced this same decision. "
+                    f"Your response will be compared to what they actually did."
+                ),
+                severity=fork["severity"],
+                injected_day=state.day,
+            )
+            # Tag the crisis so we can link it back to the fork
+            state.personal_crises.append(crisis)
+            fork["crisis_id"] = crisis.id
+            state.postmortem_triggered_forks.append(fork)
+            events.append(
+                f"🔮 RESURRECTION FORK [{fork['title']}]: A critical decision moment "
+                f"from the real {state.postmortem_scenario_id.upper() if state.postmortem_scenario_id else 'startup'} "
+                f"history has arrived. Check your briefing for the {fork['target_role'].upper()} role."
+            )
+        else:
+            still_pending.append(fork)
+
+    state.postmortem_fork_points = still_pending
+
+
 def tick_day(state: WorldState, rng: random.Random) -> list[str]:
     """
     Advance the world by one business day. Returns list of event descriptions.
@@ -227,6 +266,9 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
                 f"🆘 Personal crisis for {template['target_role'].value.upper()}: "
                 f"{template['description'][:80]}..."
             )
+
+    # ── 6a. Postmortem fork-point injection ──────────────────────────
+    _inject_postmortem_forks(state, events)
 
     # ── 6b. Mark stale unresolved crises as ignored ──────────────────
     CRISIS_EXPIRY_DAYS = 14  # If unresolved after 14 days → ignored
