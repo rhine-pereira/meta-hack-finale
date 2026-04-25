@@ -208,7 +208,7 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
 
     # ── 6. Personal crisis injection ─────────────────────────────────
     # Crises inject based on difficulty and time
-    crisis_freq = {1: 30, 2: 30, 3: 21, 4: 15, 5: 7}[state.difficulty.value]
+    crisis_freq = {1: 30, 2: 30, 3: 21, 4: 7, 5: 7}[state.difficulty.value]
     active_crises = [c for c in state.personal_crises if not c.resolved]
     if state.day % crisis_freq == 0 and len(active_crises) < 2:
         unused = [t for t in PERSONAL_CRISIS_TEMPLATES
