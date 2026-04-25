@@ -181,18 +181,29 @@ def run_episode(role: str, action_text: str, seed: int = 42) -> tuple[dict, list
     return reward_data, reward_data.get("weaknesses", [])
 
 def genesis_reward_fn(completions, prompts, **kwargs):
-    rewards = []
-    for comp, prompt in zip(completions, prompts):
+    """Evaluate completions in parallel threads to avoid serial HTTP bottleneck."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _eval(idx_comp_prompt):
+        idx, comp, prompt = idx_comp_prompt
         try:
-            role = "ceo" # Simplified role detection
+            role = "ceo"
             for r in ROLES:
                 if r in prompt.lower(): role = r; break
-            data, weaknesses = run_episode(role, comp)
+            data, weaknesses = run_episode(role, comp, seed=idx)
             reward = float(data.get("reward", 0.0))
             _self_play.record(reward, weaknesses)
-            rewards.append(reward)
-        except: rewards.append(0.0)
-    return rewards
+            return idx, reward
+        except Exception:
+            return idx, 0.0
+
+    results = [None] * len(completions)
+    with ThreadPoolExecutor(max_workers=len(completions)) as pool:
+        futures = [pool.submit(_eval, (i, c, p)) for i, (c, p) in enumerate(zip(completions, prompts))]
+        for f in as_completed(futures):
+            idx, reward = f.result()
+            results[idx] = reward
+    return results
 
 # ── Main Training Loop ────────────────────────────────────────────────────────
 def train():
@@ -204,7 +215,6 @@ def train():
 
     print(f"\nLoading {args.model}...")
     
-    # 4-bit quantization config
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
@@ -218,16 +228,21 @@ def train():
         device_map="auto",
         torch_dtype=torch.float16,
     )
-    
+    model.config.use_cache = False  # incompatible with gradient checkpointing
+
     tokenizer = AutoTokenizer.from_pretrained(args.model)
-    tokenizer.pad_token = tokenizer.eos_token # Standard for Qwen/Llama
-    
-    # LoRA config
+    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"  # decoder-only: pad on left for faster generation
+
+    # Enable gradient checkpointing for 4-bit models before adding LoRA
+    from peft import prepare_model_for_kbit_training
+    model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+
     lora_config = LoraConfig(
-        r=16,
-        lora_alpha=32,
+        r=8,          # halved from 16 — fewer trainable params, faster backward pass
+        lora_alpha=16,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-        lora_dropout=0.05,
+        lora_dropout=0.0,  # dropout slows training; not needed at small r
         bias="none",
         task_type=TaskType.CAUSAL_LM,
     )
@@ -242,11 +257,13 @@ def train():
         max_steps=args.steps,
         num_generations=args.num_generations,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=args.num_generations * 4,
+        gradient_accumulation_steps=4,
         learning_rate=5e-5,
-        max_completion_length=256,
+        max_completion_length=128,  # halved from 256 — generation is the slowest part
         fp16=False,
         bf16=False,
+        optim="adamw_8bit",   # 8-bit Adam: same convergence, less memory, faster optimizer step
+        dataloader_pin_memory=True,
         logging_steps=5,
         report_to="none",
     )
