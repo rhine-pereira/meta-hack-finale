@@ -79,6 +79,7 @@ interface GenesisStore {
   // Founder Genome (USP 3)
   modelId: string | null;
   genomes: Record<string, FounderGenome>;
+  genomeExports: Record<string, GenomeExport>;
   comparison: ComparisonExport | null;
 
   // Actions
@@ -156,6 +157,7 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
 
   modelId: null,
   genomes: {},
+  genomeExports: {},
   comparison: null,
 
   // Actions
@@ -325,7 +327,8 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
     try {
       const result = await genesisClient.callTool("export_founder_genome", { model_id: modelId });
       set((state) => ({
-        genomes: { ...state.genomes, [modelId]: result.genome }
+        genomes: { ...state.genomes, [modelId]: result.genome },
+        genomeExports: { ...state.genomeExports, [modelId]: result }
       }));
       return result;
     } catch (error) {
