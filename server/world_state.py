@@ -37,6 +37,7 @@ class Employee:
     morale: float             # 0-1
     burnout_risk: float       # 0-1, increases with overwork
     is_toxic: bool            # hidden: causes morale drain in team
+    annual_salary: float = 0.0
     months_employed: int = 0
     flight_risk: float = 0.0  # 0-1
 
@@ -111,8 +112,8 @@ class WorldState:
     # ── Simulation clock ──────────────────────────────────────────
     day: int = 0
     episode_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    difficulty: DifficultyLevel = DifficultyLevel.SEED
-    max_days: int = 180
+    difficulty: DifficultyLevel = DifficultyLevel.GAUNTLET
+    max_days: int = 540
 
     # ── Company financials ────────────────────────────────────────
     cash: float = 500_000.0          # Starting capital (seed)
@@ -133,6 +134,7 @@ class WorldState:
     employees: list[Employee] = field(default_factory=list)
     open_positions: list[dict] = field(default_factory=list)
     candidate_pool: list[dict] = field(default_factory=list)
+    pending_hires: list[dict] = field(default_factory=list)
 
     # ── Market & Customers ────────────────────────────────────────
     customers: list[Customer] = field(default_factory=list)
@@ -147,6 +149,7 @@ class WorldState:
 
     # ── Shared Memory (CompanyBrain) ──────────────────────────────
     company_brain: dict[str, str] = field(default_factory=dict)
+    last_weekly_memo_day: int = 0
 
     # ── Inter-agent messages ──────────────────────────────────────
     messages: list[Message] = field(default_factory=list)
@@ -172,6 +175,7 @@ class WorldState:
     pivot_in_progress: bool = False
     pivot_direction: Optional[str] = None
     pivot_day_started: Optional[int] = None
+    pivot_ballot: Optional[dict] = None
 
     # ── Reward tracking ───────────────────────────────────────────
     cumulative_reward: float = 0.0

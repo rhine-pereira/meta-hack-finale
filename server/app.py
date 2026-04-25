@@ -6,6 +6,7 @@ Exposes tools to LLM agents for co-founding and operating a startup.
 import os
 import pickle
 import random
+import uuid
 from typing import Dict
 from fastmcp import FastMCP
 
@@ -16,9 +17,8 @@ from .reward_engine import compute_reward
 from .market_maker import MarketMaker
 
 # ── Global Registry ──────────────────────────────────────────────────────────
-from fastapi import FastAPI, WebSocket, Request
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
-from mcp.server.websocket import websocket_server
 
 # Create the FastMCP instance
 mcp = FastMCP("genesis")
@@ -81,23 +81,40 @@ def _get_rng(episode_id: str) -> random.Random:
         RNGS[episode_id] = random.Random(42)
     return RNGS[episode_id]
 
+
+def _execute_pivot(state: WorldState, new_direction: str, rationale: str) -> None:
+    """Apply pivot side effects once a ballot is approved or overridden."""
+    state.pivot_in_progress = True
+    state.pivot_direction = new_direction
+    state.pivot_day_started = state.day
+    state.pivot_count += 1
+
+    # Severe morale hit during pivot
+    for emp in state.employees:
+        emp.morale = max(0.0, emp.morale - 0.15)
+    for role in state.cofounder_morale:
+        state.cofounder_morale[role] = max(0.0, state.cofounder_morale[role] - 0.10)
+
+    state.company_brain["pivot_direction"] = new_direction
+    state.company_brain["pivot_rationale"] = rationale
+
 # ── Tasks 1 & 2: Session Lifecycle ───────────────────────────────────────────
 
 @mcp.tool()
-def reset(episode_id: str, difficulty: int = 2, seed: int = 42) -> dict:
+def reset(episode_id: str, difficulty: int = 4, seed: int = 42) -> dict:
     """
     Initialize or reset a startup simulation episode.
     
     Args:
         episode_id: Unique identifier for the session.
-        difficulty: 1 (Tutorial) to 5 (Nightmare). Default is 2 (Seed).
+        difficulty: 1 (Tutorial) to 5 (Nightmare). Default is 4 (Gauntlet).
         seed: Random seed for reproducibility.
     """
     # Map int difficulty to Enum
     try:
         diff_enum = DifficultyLevel(difficulty)
     except ValueError:
-        diff_enum = DifficultyLevel.SEED
+        diff_enum = DifficultyLevel.GAUNTLET
 
     # Initialize state and RNG
     state = initialize_world(difficulty=diff_enum, seed=seed)
@@ -421,37 +438,40 @@ def hire_candidate(episode_id: str, agent_role: str, candidate_id: str, role: st
     if not candidate:
         return {"error": f"Candidate {candidate_id} not found."}
     
-    from .world_state import Employee
-    import uuid
-    
-    new_emp = Employee(
-        id=str(uuid.uuid4()),
-        name=candidate["name"],
-        role=role,
-        skill_level=candidate["skill_level"],
-        morale=0.85,
-        burnout_risk=0.1,
-        is_toxic=candidate["is_toxic"]
-    )
-    
-    state.employees.append(new_emp)
+    start_day = state.day + 14
+    pending_hire = {
+        "name": candidate["name"],
+        "role": role,
+        "skill_level": candidate["skill_level"],
+        "is_toxic": candidate["is_toxic"],
+        "annual_salary": max(int(salary), 1),
+        "start_day": start_day,
+    }
+
+    state.pending_hires.append(pending_hire)
     state.candidate_pool.remove(candidate)
-    
-    # Update burn rate (approximate daily cost)
+
+    # Hiring has delayed effect: compensation only starts at onboarding.
     # Log event for consequence tracking
     event_id = str(uuid.uuid4())
     state.event_history.append({
-        "id": event_id, "type": "hire", "day": state.day, 
-        "desc": f"Hired {new_emp.name} as {role}", "entity_id": new_emp.id, "is_toxic": new_emp.is_toxic
+        "id": event_id,
+        "type": "hire_offer",
+        "day": state.day,
+        "desc": f"Offer accepted by {pending_hire['name']} for {role}",
+        "start_day": start_day,
+        "is_toxic": pending_hire["is_toxic"],
     })
     
     save_sessions()
     
     return {
-        "hired": new_emp.name,
+        "hired": pending_hire["name"],
         "role": role,
-        "skill_level": new_emp.skill_level,
-        "message": "New employee successfully onboarded."
+        "skill_level": pending_hire["skill_level"],
+        "start_day": start_day,
+        "days_until_start": 14,
+        "message": "Offer accepted. Onboarding completes in 14 days."
     }
 
 @mcp.tool()
@@ -484,6 +504,9 @@ def fire_employee(episode_id: str, agent_role: str, employee_id: str, severance:
         knowledge_loss = "low"
     
     state.employees.remove(emp)
+    state.cash = max(0.0, state.cash - severance)
+    salary_savings = emp.annual_salary / 365.0 if emp.annual_salary > 0 else 250
+    state.burn_rate_daily = max(0.0, state.burn_rate_daily - salary_savings)
     
     # Morale hit to the team
     for other in state.employees:
@@ -501,7 +524,9 @@ def fire_employee(episode_id: str, agent_role: str, employee_id: str, severance:
     return {
         "fired": emp.name,
         "knowledge_loss": knowledge_loss,
-        "team_morale_after": state.team_avg_morale()
+        "team_morale_after": state.team_avg_morale(),
+        "cash_after_severance": state.cash,
+        "burn_rate_daily_after": state.burn_rate_daily,
     }
 
 @mcp.tool()
@@ -536,6 +561,11 @@ def write_company_brain(episode_id: str, agent_role: str, key: str, value: str) 
     """
     state = _get_state(episode_id)
     state.company_brain[key] = value
+
+    lowered = key.lower()
+    if any(token in lowered for token in ("weekly_state", "state_of_company", "weekly_memo")):
+        state.last_weekly_memo_day = state.day
+
     save_sessions()
     
     return {
@@ -673,41 +703,132 @@ def send_message(episode_id: str, from_role: str, to_role: str, subject: str, co
     }
 
 @mcp.tool()
-def pivot_company(episode_id: str, agent_role: str, new_direction: str, rationale: str) -> dict:
+def pivot_company(episode_id: str, agent_role: str, new_direction: str, rationale: str, vote: str = "approve") -> dict:
     """
-    Execute a radical company pivot. Only the CEO can initiate this.
-    
+    Propose or vote on a radical company pivot.
+
+    By default, a pivot executes when there is a majority approval (3/5)
+    including the CEO. The CEO can also force execution with vote='override'.
+
     Args:
         episode_id: Unique identifier for the session.
-        agent_role: Must be 'ceo'.
+        agent_role: One of ceo/cto/sales/people/cfo.
         new_direction: The new product/market direction.
         rationale: Why this pivot is necessary.
+        vote: approve, reject, or override (CEO only).
     """
-    if agent_role != "ceo":
-        return {"error": "Unauthorized. Only the CEO can pivot the company."}
-    
     state = _get_state(episode_id)
-    state.pivot_in_progress = True
-    state.pivot_direction = new_direction
-    state.pivot_day_started = state.day
-    state.pivot_count += 1
-    
-    # Severe morale hit during pivot
-    for emp in state.employees:
-        emp.morale = max(0.0, emp.morale - 0.15)
-    for role in state.cofounder_morale:
-        state.cofounder_morale[role] = max(0.0, state.cofounder_morale[role] - 0.10)
-    
-    state.company_brain["pivot_direction"] = new_direction
-    state.company_brain["pivot_rationale"] = rationale
-    
+
+    try:
+        normalized_role = AgentRole(agent_role.lower()).value
+    except ValueError:
+        return {"error": f"Unknown role '{agent_role}'."}
+
+    vote = vote.lower().strip()
+    if vote not in {"approve", "reject", "override"}:
+        return {"error": "Invalid vote. Use approve, reject, or override."}
+
+    if vote == "override" and normalized_role != "ceo":
+        return {"error": "Only the CEO can use override for a pivot."}
+
+    if state.pivot_in_progress and state.pivot_direction == new_direction:
+        return {
+            "executed": True,
+            "direction": state.pivot_direction,
+            "pivot_count": state.pivot_count,
+            "message": "Pivot already in progress for this direction.",
+        }
+
+    ballot = state.pivot_ballot
+    if ballot is None or ballot.get("status") in {"executed", "rejected"}:
+        ballot = {
+            "new_direction": new_direction,
+            "rationale": rationale,
+            "proposed_by": normalized_role,
+            "created_day": state.day,
+            "approvals": [],
+            "rejections": [],
+            "status": "pending",
+        }
+        state.pivot_ballot = ballot
+    elif ballot.get("new_direction") != new_direction:
+        return {
+            "error": "An active pivot ballot already exists for a different direction.",
+            "active_direction": ballot.get("new_direction"),
+        }
+
+    approvals = set(ballot.get("approvals", []))
+    rejections = set(ballot.get("rejections", []))
+    approvals.discard(normalized_role)
+    rejections.discard(normalized_role)
+
+    if vote == "approve":
+        approvals.add(normalized_role)
+    elif vote == "reject":
+        rejections.add(normalized_role)
+    else:
+        _execute_pivot(state, new_direction, rationale)
+        approvals.add(normalized_role)
+        ballot["approvals"] = sorted(approvals)
+        ballot["rejections"] = sorted(rejections)
+        ballot["status"] = "executed"
+        ballot["resolved_day"] = state.day
+        state.pivot_ballot = ballot
+        save_sessions()
+        return {
+            "executed": True,
+            "resolution": "ceo_override",
+            "approvals": ballot["approvals"],
+            "rejections": ballot["rejections"],
+            "direction": new_direction,
+            "pivot_count": state.pivot_count,
+            "morale_impact": -0.15,
+            "message": "Pivot executed via CEO override.",
+        }
+
+    ballot["approvals"] = sorted(approvals)
+    ballot["rejections"] = sorted(rejections)
+
+    if len(approvals) >= 3 and "ceo" in approvals:
+        _execute_pivot(state, new_direction, rationale)
+        ballot["status"] = "executed"
+        ballot["resolved_day"] = state.day
+        state.pivot_ballot = ballot
+        save_sessions()
+        return {
+            "executed": True,
+            "resolution": "majority",
+            "approvals": ballot["approvals"],
+            "rejections": ballot["rejections"],
+            "direction": new_direction,
+            "pivot_count": state.pivot_count,
+            "morale_impact": -0.15,
+            "message": "Pivot approved by majority (including CEO) and executed.",
+        }
+
+    if len(rejections) >= 3:
+        ballot["status"] = "rejected"
+        ballot["resolved_day"] = state.day
+        state.pivot_ballot = ballot
+        save_sessions()
+        return {
+            "executed": False,
+            "status": "rejected",
+            "approvals": ballot["approvals"],
+            "rejections": ballot["rejections"],
+            "message": "Pivot rejected by majority vote.",
+        }
+
+    ballot["status"] = "pending"
+    state.pivot_ballot = ballot
     save_sessions()
-    
     return {
-        "pivot_count": state.pivot_count,
-        "direction": new_direction,
-        "morale_impact": -0.15,
-        "message": "Company successfully pivoted. The team is shocked but following."
+        "executed": False,
+        "status": "pending",
+        "approvals": ballot["approvals"],
+        "rejections": ballot["rejections"],
+        "required_for_execution": "3 approvals including CEO",
+        "message": "Pivot vote recorded. Awaiting additional votes.",
     }
 
 # ── Additional Product & Engineering Tools ────────────────────────────────
@@ -959,26 +1080,27 @@ def post_job_listing(episode_id: str, agent_role: str, role: str, requirements: 
     if agent_role not in ("people", "ceo"):
         return {"error": "Unauthorized. Only People and CEO can post jobs."}
     state = _get_state(episode_id)
-    import uuid
-    listing = {"id": str(uuid.uuid4()), "role": role, "requirements": requirements,
-               "salary_range": [salary_min, salary_max], "posted_day": state.day}
-    state.open_positions.append(listing)
+    listing = {
+        "id": str(uuid.uuid4()),
+        "role": role,
+        "requirements": requirements,
+        "salary_range": [salary_min, salary_max],
+        "posted_day": state.day,
+        "applicants_arrive_day": state.day + 5,
+        "applicants_generated": False,
+    }
     rng = _get_rng(episode_id)
-    new_candidates = rng.randint(2, 5)
-    for i in range(new_candidates):
-        skill = rng.uniform(0.3, 0.95)
-        state.candidate_pool.append({
-            "id": str(uuid.uuid4()), "name": f"Applicant-{role[:3]}-{i+1}",
-            "role": role, "skill_level": round(skill, 2),
-            "salary_ask": int(skill * (salary_max - salary_min) + salary_min),
-            "is_toxic": rng.random() < 0.12, "interview_score": round(rng.uniform(0.4, 0.95), 2),
-        })
+    listing["pending_applicants_count"] = rng.randint(2, 5)
+    state.open_positions.append(listing)
     save_sessions()
     return {
-        "listing_id": listing["id"], "role": role,
-        "new_applicants": new_candidates,
+        "listing_id": listing["id"],
+        "role": role,
+        "new_applicants_now": 0,
+        "expected_new_applicants": listing["pending_applicants_count"],
+        "applicants_arrive_day": listing["applicants_arrive_day"],
         "total_candidates": len(state.candidate_pool),
-        "message": f"Job posted for {role}. {new_candidates} new applicants added."
+        "message": f"Job posted for {role}. Applicants will arrive after a 5-day delay."
     }
 
 @mcp.tool()
@@ -1085,7 +1207,5 @@ def get_reward(episode_id: str) -> dict:
 
 # ── ASGI Bridge ─────────────────────────────────────────────────────────────
 # This allows openenv.yaml (server.app:app) to work
-app = mcp.http_app()
-
 if __name__ == "__main__":
     mcp.run()
