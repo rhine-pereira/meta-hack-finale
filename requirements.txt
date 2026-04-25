@@ -1,0 +1,17 @@
+# GENESIS — Core Dependencies
+openenv-core[core]
+fastapi
+pydantic
+uvicorn
+requests
+fastmcp
+numpy
+matplotlib
+pillow
+
+# LLM & Training (Compulsory)
+# torch (Temporary as torch is downloaded separetly)
+transformers
+trl
+datasets
+unsloth

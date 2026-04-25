@@ -15,6 +15,27 @@ Requirements:
     (unsloth: https://github.com/unslothai/unsloth)
 """
 
+import sys
+from unittest.mock import MagicMock
+
+# --- Windows Triton Mock ---
+try:
+    import triton
+except ImportError:
+    # Mock Triton to bypass import errors on Windows
+    from unittest.mock import MagicMock
+    from importlib.machinery import ModuleSpec
+    
+    mock_triton = MagicMock()
+    mock_triton.__version__ = "3.0.0"
+    mock_triton.__spec__ = ModuleSpec("triton", None)
+    mock_triton.__path__ = []
+    
+    sys.modules["triton"] = mock_triton
+    sys.modules["triton.compiler"] = MagicMock()
+    sys.modules["triton.language"] = MagicMock()
+    sys.modules["triton.runtime"] = MagicMock()
+
 import argparse
 import json
 import os
@@ -417,12 +438,17 @@ def train():
 
     # ── Import ML dependencies (only when training) ───────────────
     try:
+        import transformers
+        from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
         from unsloth import FastLanguageModel
         from trl import GRPOConfig, GRPOTrainer
         from datasets import Dataset
     except ImportError as e:
         print(f"\n[ERROR] Missing dependency: {e}")
-        print("Install with: pip install trl transformers unsloth datasets")
+        print("Detailed error for debugging:")
+        import traceback
+        traceback.print_exc()
+        print("\nInstall with: pip install trl transformers unsloth datasets torch")
         sys.exit(1)
 
     # ── Model Setup ───────────────────────────────────────────────
