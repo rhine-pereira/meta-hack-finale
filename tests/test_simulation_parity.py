@@ -146,3 +146,27 @@ def test_ceo_can_override_pivot_vote():
 
     assert result["executed"] is True
     assert result["resolution"] == "ceo_override"
+
+
+def test_gauntlet_crisis_cadence_is_weekly():
+    episode_id = _reset_episode(difficulty=4)
+    state = server_app._get_state(episode_id)
+    before_count = len(state.personal_crises)
+
+    for crisis in list(state.personal_crises):
+        server_app.handle_personal_crisis(
+            episode_id=episode_id,
+            agent_role=crisis.target_role.value,
+            crisis_id=crisis.id,
+            response="I understand the situation, let's talk through a clear plan and concrete next steps.",
+        )
+
+    for _ in range(6):
+        server_app.get_daily_briefing(episode_id=episode_id, agent_role="ceo")
+
+    state = server_app._get_state(episode_id)
+    assert len(state.personal_crises) == before_count
+
+    server_app.get_daily_briefing(episode_id=episode_id, agent_role="ceo")
+    state = server_app._get_state(episode_id)
+    assert len(state.personal_crises) > before_count
