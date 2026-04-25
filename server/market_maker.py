@@ -24,7 +24,11 @@ class MarketMaker:
         self.state = state
         self.rng = rng
         self.episode_start_reward = 0.0
-        self.weaknesses = []  # Track what agents are weak at
+        self.weaknesses = list(state.market_maker_weaknesses)
+
+    def persist_weaknesses(self) -> None:
+        """Write accumulated weaknesses back to state for persistence."""
+        self.state.market_maker_weaknesses = list(self.weaknesses)
 
     def observe_performance(self, current_reward: float) -> None:
         """Track performance to detect weaknesses."""
