@@ -17,10 +17,14 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const GenomePanel: React.FC = () => {
-  const { modelId, genomes, exportGenome } = useGenesisStore();
+  const { modelId, genomes, genomeExports, exportGenome } = useGenesisStore();
   const [isExporting, setIsExporting] = useState(false);
   
   const genome = modelId ? genomes[modelId] : null;
+  const genomeExport = modelId ? genomeExports[modelId] : null;
+  const baseUrl = process.env.NEXT_PUBLIC_GENESIS_URL || "http://localhost:7860";
+  const pngUrl = genomeExport?.artifacts?.png ? `${baseUrl}/${genomeExport.artifacts.png}` : null;
+  const jsonUrl = genomeExport?.artifacts?.json ? `${baseUrl}/${genomeExport.artifacts.json}` : null;
 
   const handleExport = async () => {
     if (!modelId) return;
@@ -73,6 +77,44 @@ export const GenomePanel: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Exported Card Preview */}
+            {pngUrl && (
+              <div className="bg-bg-void/40 p-3 rounded-xl border border-border-dim">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[9px] text-text-muted uppercase font-black tracking-widest font-mono">
+                    Genome Card
+                  </div>
+                  <div className="flex gap-2">
+                    {jsonUrl && (
+                      <a
+                        href={jsonUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2.5 py-1 rounded bg-bg-void/50 border border-border-dim text-[9px] font-black uppercase tracking-widest text-text-muted hover:text-accent hover:border-accent/30 transition-all"
+                      >
+                        JSON
+                      </a>
+                    )}
+                    <a
+                      href={pngUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2.5 py-1 rounded bg-accent/10 border border-accent/30 text-[9px] font-black uppercase tracking-widest text-accent hover:bg-accent/20 transition-all"
+                    >
+                      PNG
+                    </a>
+                  </div>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-border-dim bg-bg-void/20">
+                  <img
+                    src={pngUrl}
+                    alt={`Founder Genome: ${modelId}`}
+                    className="w-full h-auto block"
+                  />
+                </div>
+              </div>
+            )}
+
             {/* Metadata Stats */}
             <div className="grid grid-cols-3 gap-2">
               {[

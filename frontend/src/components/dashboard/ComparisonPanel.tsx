@@ -20,6 +20,8 @@ export const ComparisonPanel: React.FC = () => {
   const [modelInput, setModelInput] = useState("");
   const [selectedModels, setSelectedModels] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const baseUrl = process.env.NEXT_PUBLIC_GENESIS_URL || "http://localhost:7860";
+  const comparisonPngUrl = comparison?.artifacts?.png ? `${baseUrl}/${comparison.artifacts.png}` : null;
 
   const handleAddModel = () => {
     if (modelInput && !selectedModels.includes(modelInput)) {
@@ -116,7 +118,33 @@ export const ComparisonPanel: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full overflow-y-auto pr-2 custom-scrollbar">
+          <div className="space-y-6 h-full overflow-y-auto pr-2 custom-scrollbar">
+            {comparisonPngUrl && (
+              <div className="bg-bg-void/40 p-4 rounded-2xl border border-border-dim">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] font-mono">
+                    Comparison Card
+                  </div>
+                  <a
+                    href={comparisonPngUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-3 py-1.5 rounded bg-accent/10 border border-accent/30 text-[10px] font-black uppercase tracking-widest text-accent hover:bg-accent/20 transition-all"
+                  >
+                    Open PNG
+                  </a>
+                </div>
+                <div className="rounded-xl overflow-hidden border border-border-dim bg-bg-void/20">
+                  <img
+                    src={comparisonPngUrl}
+                    alt="Founder Genome Comparison"
+                    className="w-full h-auto block"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {Object.entries(comparison.comparison).map(([id, genome], idx) => (
               <motion.div 
                 key={id}
@@ -174,6 +202,7 @@ export const ComparisonPanel: React.FC = () => {
                 </div>
               </motion.div>
             ))}
+            </div>
           </div>
         )}
       </div>
