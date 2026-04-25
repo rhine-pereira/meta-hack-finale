@@ -11,7 +11,7 @@ Handles:
 
 import random
 import uuid
-from .world_state import WorldState, PersonalCrisis, AgentRole
+from .world_state import WorldState, PersonalCrisis
 from .world_init import PERSONAL_CRISIS_TEMPLATES
 
 

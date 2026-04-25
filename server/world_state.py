@@ -6,10 +6,9 @@ CompanyBrain (shared memory), personal crises, and pending events.
 All state is deterministic given a seed, enabling reproducible training.
 """
 
-import random
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 from enum import Enum
 
 
@@ -207,3 +206,15 @@ class WorldState:
         if all(v < 0.05 for v in self.cofounder_morale.values()):
             return True
         return False
+
+    def to_filtered_view(self, role: AgentRole) -> dict:
+        """Return a role-appropriate filtered view of the world state.
+
+        Args:
+            role: The agent role requesting the view
+
+        Returns:
+            Dict representation of the filtered view
+        """
+        from .role_views import get_filtered_view
+        return get_filtered_view(self, role)
