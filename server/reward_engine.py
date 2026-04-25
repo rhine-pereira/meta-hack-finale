@@ -148,7 +148,7 @@ def compute_reward(state: WorldState) -> RubricScore:
         score.pivot_execution * WEIGHTS["pivot_execution"]
     )
 
-    # Catastrophic failure penalties
+    # ── Catastrophic failure penalties ────────────────────────────────
     if state.cash <= 0:
         score.total = score.total * 0.1   # 90% penalty for going bankrupt
     if all(v < 0.1 for v in state.cofounder_morale.values()):
