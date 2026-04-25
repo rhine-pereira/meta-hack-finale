@@ -5,19 +5,17 @@ import { useGenesisStore } from "@/lib/store";
 import { 
   ShieldAlert, 
   UserCircle, 
-  Terminal, 
   LayoutDashboard, 
   FileText, 
   Users, 
   Briefcase, 
   BrainCircuit, 
-  HeartPulse, 
   HelpCircle,
   AlertTriangle,
   History,
   Activity,
-  Skull,
-  TrendingUp
+  TrendingUp,
+  Skull
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -42,6 +40,7 @@ export const Sidebar = () => {
         { label: "Market Intel", href: "/market", icon: TrendingUp },
         { label: "Founders & Team", href: "/team", icon: Users },
         { label: "Financials", href: "/financials", icon: FileText },
+        { label: "Resurrection Engine", href: "/postmortem", icon: Skull, color: "text-signal-red" },
       ]
     },
     {
@@ -76,23 +75,23 @@ export const Sidebar = () => {
             <div className="px-6 py-2 text-[10px] text-text-muted uppercase tracking-widest font-bold mb-1">
               {group.label}
             </div>
-          </a>
+            {group.links.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={cn(
+                  "py-3 px-6 flex items-center gap-3 transition-all duration-200",
+                  pathname === link.href
+                    ? "bg-accent/10 text-accent border-r-2 border-accent opacity-100"
+                    : "text-text-secondary opacity-60 hover:bg-white/5 hover:opacity-100"
+                )}
+              >
+                <link.icon size={16} className={link.color} />
+                <span className="flex-1">{link.label}</span>
+              </Link>
+            ))}
+          </div>
         ))}
-
-        <div className="mt-6 px-6 py-2 text-[10px] text-text-muted uppercase tracking-widest font-bold border-t border-white/5 pt-6">
-          Operations
-        </div>
-        <a href="/postmortem" className="text-signal-red py-3 px-6 flex items-center gap-3 opacity-80 hover:bg-signal-red/5 hover:opacity-100 transition-all group">
-          <Skull size={16} />
-          <span className="flex-1">Resurrection</span>
-          <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-signal-red/10 border border-signal-red/20 text-signal-red opacity-0 group-hover:opacity-100 transition-opacity">NEW</span>
-        </a>
-        <a href="#" className="text-text-secondary py-3 px-6 flex items-center gap-3 opacity-60 hover:bg-white/5 hover:opacity-100 transition-all">
-          <Activity size={16} /> Diagnostics
-        </a>
-        <a href="#" className="text-text-secondary py-3 px-6 flex items-center gap-3 opacity-60 hover:bg-white/5 hover:opacity-100 transition-all">
-          <HelpCircle size={16} /> Support
-        </a>
       </nav>
 
       <div className="p-4 border-t border-white/5 bg-bg-void/50">
