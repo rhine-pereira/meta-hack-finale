@@ -1,6 +1,11 @@
 {
   "version": 1,
   "skills": {
+    "claude-api": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "1b065ff6b5dab1568c15b647192763a4ffba56251ec3e8130863a7dea4c11ba5"
+    },
     "find-skills": {
       "source": "vercel-labs/skills",
       "sourceType": "github",
