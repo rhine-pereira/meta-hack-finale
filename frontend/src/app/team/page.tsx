@@ -3,6 +3,7 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
@@ -19,7 +20,7 @@ import {
 
 export default function Team() {
   const { 
-    employees, candidatePool, cofounderMorale 
+    employees, candidatePool, cofounderMorale, hireCandidate
   } = useGenesisStore();
 
   const avgMorale = employees.length > 0 
@@ -35,6 +36,7 @@ export default function Team() {
              <p className="text-text-secondary text-sm">Human capital health and recruitment intelligence.</p>
            </div>
            <div className="flex gap-2">
+              <BackToDashboard />
               <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2">
                 <UserPlus size={16} />
                 Post Job
@@ -199,7 +201,10 @@ export default function Team() {
                                    <td className="p-3 text-right font-mono text-signal-green">{(c.skill_level * 100).toFixed(0)}</td>
                                    <td className="p-3 text-right font-mono text-accent">{(c.interview_score * 100).toFixed(0)}</td>
                                    <td className="p-3 text-center">
-                                      <button className="bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 px-3 py-1 rounded text-[9px] font-bold uppercase transition-all">
+                                      <button 
+                                        onClick={() => hireCandidate(c.id, c.role, 120000)}
+                                        className="bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 px-3 py-1 rounded text-[9px] font-bold uppercase transition-all"
+                                      >
                                          Hire
                                       </button>
                                    </td>

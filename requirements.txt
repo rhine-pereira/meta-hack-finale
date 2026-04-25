@@ -10,10 +10,13 @@ matplotlib
 pillow
 
 # LLM & Training (Compulsory)
-# torch (Temporary as torch is downloaded separetly)
-transformers
-trl
+# Note: torch is usually managed separately by Colab/Cuda environment
+transformers>=4.45.0
+trl>=0.10.0
 datasets
+peft
+bitsandbytes
+accelerate
 unsloth
 
 # Solana & Blockchain
@@ -22,3 +25,6 @@ solders
 anchorpy
 python-dotenv
 base58
+
+# Utils
+PyPDF2

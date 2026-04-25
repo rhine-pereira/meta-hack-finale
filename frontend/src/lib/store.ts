@@ -94,6 +94,14 @@ interface GenesisStore {
   exportGenome: (modelId: string) => Promise<GenomeExport>;
   compareGenomes: (modelIds: string[]) => Promise<ComparisonExport>;
   
+  // New Domain Actions
+  buildFeature: (name: string, complexity: string, engineers: int) => Promise<void>;
+  analyzeMarket: (segment: string) => Promise<void>;
+  hireCandidate: (candidateId: string, role: string, salary: number) => Promise<void>;
+  negotiateWithInvestor: (investorId: string, valuation: number, equity: number) => Promise<void>;
+  handleCrisis: (crisisId: string, response: string) => Promise<void>;
+  injectMemory: (key: string, value: string) => Promise<void>;
+  
   // Helpers
   runwayDays: () => number;
 }
@@ -231,30 +239,30 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       const peopleView = await genesisClient.callTool("get_company_state", { episode_id: episodeId, agent_role: "people" });
 
       set({
-        cash: cfoView.cash ?? get().cash,
-        mrr: cfoView.mrr ?? get().mrr,
-        valuation: cfoView.valuation ?? ceoView.valuation ?? get().valuation,
-        burnRateDaily: cfoView.burn_rate_daily ?? get().burn_rate_daily,
-        equitySold: cfoView.equity_sold ?? get().equity_sold,
-        seriesAClosed: ceoView.series_a_closed ?? get().series_a_closed,
+        cash: cfoView.financials?.cash ?? get().cash,
+        mrr: cfoView.financials?.mrr ?? get().mrr,
+        valuation: cfoView.financials?.valuation ?? ceoView.financials?.valuation ?? get().valuation,
+        burnRateDaily: cfoView.financials?.burn_rate_daily ?? get().burnRateDaily,
+        equitySold: cfoView.financials?.equity_sold ?? get().equitySold,
+        seriesAClosed: ceoView.series_a_closed ?? get().seriesAClosed,
         
-        productMaturity: ctoView.product_maturity ?? get().product_maturity,
-        techDebt: ctoView.tech_debt ?? get().tech_debt,
-        uptime: ctoView.uptime ?? get().uptime,
-        pendingFeatures: ctoView.pending_features ?? get().pendingFeatures,
-        featuresShipped: ctoView.features_shipped ?? get().featuresShipped,
+        productMaturity: ctoView.product?.product_maturity ?? get().productMaturity,
+        techDebt: ctoView.product?.tech_debt ?? get().techDebt,
+        uptime: ctoView.product?.uptime ?? get().uptime,
+        pendingFeatures: ctoView.product?.pending_features ?? get().pendingFeatures,
+        featuresShipped: ctoView.product?.features_shipped ?? get().featuresShipped,
 
-        employees: peopleView.employees ?? ctoView.employees ?? get().employees,
-        candidatePool: peopleView.candidate_pool ?? get().candidatePool,
-        cofunderMorale: peopleView.cofounder_morale ?? ceoView.cofounder_morale ?? get().cofounderMorale,
-        cofunderAlignment: peopleView.cofounder_alignment ?? get().cofounderAlignment,
+        employees: peopleView.team?.employees ?? ctoView.team?.employees ?? get().employees,
+        candidatePool: peopleView.team?.candidate_pool ?? get().candidatePool,
+        cofounderMorale: peopleView.team?.cofounder_morale ?? ceoView.team?.cofounder_morale ?? get().cofounderMorale,
+        cofounderAlignment: peopleView.cofounder_alignment ?? get().cofounderAlignment,
 
-        customers: ceoView.customers ?? get().customers,
-        investors: ceoView.investors ?? get().investors,
-        competitors: ceoView.competitors ?? get().competitors,
+        customers: ceoView.customers?.customers ?? get().customers,
+        investors: ceoView.investors?.investors ?? get().investors,
+        competitors: ceoView.competitors?.competitors ?? get().competitors,
 
         companyBrain: ceoView.company_brain ?? get().companyBrain,
-        personalCrises: ceoView.personal_crises ?? get().personalCrises,
+        personalCrises: ceoView.active_personal_crises ?? get().personalCrises,
 
         pivotCount: ceoView.pivot_count ?? get().pivotCount,
         pivotInProgress: ceoView.pivot_in_progress ?? get().pivotInProgress,
@@ -334,6 +342,109 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
     } catch (error) {
       console.error("Compare genomes failed:", error);
       throw error;
+    }
+  },
+
+  buildFeature: async (name, complexity, engineers) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("build_feature", { 
+        episode_id: episodeId, 
+        agent_role: "cto",
+        name,
+        complexity,
+        engineers
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Build feature failed:", error);
+    }
+  },
+
+  analyzeMarket: async (segment) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("analyze_market", { 
+        episode_id: episodeId, 
+        agent_role: "ceo",
+        segment
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Analyze market failed:", error);
+    }
+  },
+
+  hireCandidate: async (candidateId, role, salary) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("hire_candidate", { 
+        episode_id: episodeId, 
+        agent_role: "people",
+        candidate_id: candidateId,
+        role,
+        salary
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Hire candidate failed:", error);
+    }
+  },
+
+  negotiateWithInvestor: async (investorId, valuation, equity) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("negotiate_with_investor", { 
+        episode_id: episodeId, 
+        agent_role: "cfo",
+        investor_id: investorId,
+        valuation,
+        equity
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Negotiate failed:", error);
+    }
+  },
+
+  handleCrisis: async (crisisId, response) => {
+    const { episodeId, personalCrises } = get();
+    if (!episodeId) return;
+    
+    // Find the crisis to get its target role
+    const crisis = personalCrises.find(c => c.id === crisisId);
+    if (!crisis) return;
+
+    try {
+      await genesisClient.callTool("handle_personal_crisis", { 
+        episode_id: episodeId, 
+        agent_role: crisis.target_role.toLowerCase(),
+        crisis_id: crisisId,
+        response
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Handle crisis failed:", error);
+    }
+  },
+
+  injectMemory: async (key, value) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("write_company_brain", { 
+        episode_id: episodeId, 
+        agent_role: "ceo",
+        key,
+        value
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Inject memory failed:", error);
     }
   },
 

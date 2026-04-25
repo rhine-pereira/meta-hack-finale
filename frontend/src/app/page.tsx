@@ -8,6 +8,7 @@ import { EventFeed } from "@/components/dashboard/EventFeed";
 import { RewardPanel } from "@/components/dashboard/RewardPanel";
 import { ProofPanel } from "@/components/dashboard/ProofPanel";
 import { GenomePanel } from "@/components/dashboard/GenomePanel";
+import { DayPlan } from "@/components/dashboard/DayPlan";
 import { useGenesisStore } from "@/lib/store";
 import { motion } from "framer-motion";
 import { Rocket, Cpu, ChevronRight } from "lucide-react";
@@ -80,8 +81,13 @@ export default function Dashboard() {
             <AgentPanel />
           </div>
           
-          <div className="lg:col-span-6 h-full overflow-hidden">
-            <EventFeed />
+          <div className="lg:col-span-6 h-full flex flex-col gap-6 overflow-hidden">
+            <div className="h-fit shrink-0">
+              <DayPlan />
+            </div>
+            <div className="flex-1 min-h-0">
+              <EventFeed />
+            </div>
           </div>
           
           <div className="lg:col-span-3 h-full flex flex-col gap-6 overflow-hidden">
