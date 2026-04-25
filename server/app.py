@@ -1386,6 +1386,200 @@ def get_simulation_proof_status(episode_id: str) -> dict:
         "episode_fingerprint_hex": episode_fingerprint.hex()
     }
 
+# ── Dead Startup Resurrection Engine ─────────────────────────────────────────
+
+@mcp.tool()
+def list_postmortem_scenarios() -> dict:
+    """
+    List all available real-world startup failure scenarios for the Resurrection Engine.
+    Returns a catalogue of companies whose timelines can be loaded as simulation seeds.
+    """
+    from .postmortem_scenarios import list_scenarios
+    return {
+        "scenarios": list_scenarios(),
+        "message": (
+            "Use 'load_postmortem_scenario' with a scenario_id to replay a startup's "
+            "fatal decision points. The AI agents will face the same forks as the real founders."
+        )
+    }
+
+
+@mcp.tool()
+def load_postmortem_scenario(episode_id: str, scenario_id: str) -> dict:
+    """
+    Load a real-world startup failure as a simulation seed into an existing episode.
+    This injects the historical ForkPoints as PersonalCrisis events that will fire
+    at the specified simulation days, allowing AI agents to rewrite history.
+
+    Args:
+        episode_id: Existing session to inject the scenario into.
+        scenario_id: One of: quibi, jawbone, juicero, wework, theranos
+    """
+    from .postmortem_scenarios import get_scenario
+    state = _get_state(episode_id)
+
+    scenario = get_scenario(scenario_id)
+    if not scenario:
+        from .postmortem_scenarios import list_scenarios
+        valid = [s["id"] for s in list_scenarios()]
+        return {"error": f"Unknown scenario '{scenario_id}'. Valid options: {valid}"}
+
+    # Tag the state with the scenario
+    state.postmortem_scenario_id = scenario_id
+
+    # Apply market condition overrides
+    mc = scenario.market_conditions
+    if "total_tam" in mc:
+        state.total_tam = mc["total_tam"]
+    if "market_growth_rate" in mc:
+        state.market_growth_rate = mc["market_growth_rate"]
+
+    # Apply team profile overrides
+    tp = scenario.team_profile
+    if "cofounder_alignment" in tp:
+        state.cofounder_alignment = tp["cofounder_alignment"]
+    if "avg_morale" in tp:
+        for role in state.cofounder_morale:
+            state.cofounder_morale[role] = tp["avg_morale"]
+    if "burn_rate_multiplier" in tp:
+        state.burn_rate_daily = state.burn_rate_daily * tp["burn_rate_multiplier"]
+
+    # Apply funding constraints (set starting cash based on first funding round)
+    if scenario.funding_history:
+        first_round = scenario.funding_history[0]
+        state.cash = max(state.cash, first_round["amount"] * 0.3)  # Simulate pre-burn cash
+
+    # Encode fork points as lightweight dicts for the state
+    state.postmortem_fork_points = [
+        {
+            "day": fp.day,
+            "title": fp.title,
+            "context": fp.context,
+            "what_founders_did": fp.what_founders_did,
+            "known_outcome": fp.known_outcome,
+            "severity": fp.severity,
+            "target_role": fp.target_role,
+            "category": fp.category,
+        }
+        for fp in scenario.fatal_decisions
+    ]
+    state.postmortem_triggered_forks = []
+    state.ai_decisions_at_forks = []
+
+    # Seed the company brain with scenario context
+    state.company_brain["postmortem_company"] = scenario.company_name
+    state.company_brain["postmortem_context"] = (
+        f"You are re-running {scenario.company_name} ({scenario.year_founded}-{scenario.year_failed}). "
+        f"Tagline: {scenario.tagline}. "
+        f"Historical failure: {scenario.failure_summary[:300]}"
+    )
+
+    save_sessions()
+
+    return {
+        "scenario_loaded": scenario.company_name,
+        "scenario_id": scenario_id,
+        "company": scenario.company_name,
+        "tagline": scenario.tagline,
+        "total_funding_raised": scenario.total_funding_raised,
+        "fork_points_loaded": len(scenario.fatal_decisions),
+        "fork_schedule": [
+            {"day": fp.day, "title": fp.title, "target_role": fp.target_role}
+            for fp in scenario.fatal_decisions
+        ],
+        "message": (
+            f"Scenario '{scenario.company_name}' loaded. "
+            f"{len(scenario.fatal_decisions)} historical fork points will fire during the simulation. "
+            f"When a fork arrives, the target agent will receive it as a personal crisis. "
+            f"Their response will be logged for the Resurrection Report."
+        )
+    }
+
+
+@mcp.tool()
+def record_fork_decision(episode_id: str, agent_role: str, crisis_id: str, decision_summary: str) -> dict:
+    """
+    Record an agent's decision at a historical ForkPoint for the Resurrection Report.
+    Call this alongside handle_personal_crisis when responding to a HISTORICAL FORK crisis.
+
+    Args:
+        episode_id: Session identifier.
+        agent_role: The role making the decision.
+        crisis_id: The crisis ID from the active_crises list (must be a fork-point crisis).
+        decision_summary: A clear description of what the AI agent decided to do.
+    """
+    state = _get_state(episode_id)
+
+    # Find the matching triggered fork
+    matching_fork = next(
+        (f for f in state.postmortem_triggered_forks if f.get("crisis_id") == crisis_id),
+        None
+    )
+    if not matching_fork:
+        return {
+            "error": f"Crisis '{crisis_id}' is not a historical fork point, or was not yet triggered.",
+            "hint": "Only use this tool for crises tagged as [HISTORICAL FORK] in their description."
+        }
+
+    # Record the AI decision
+    existing = next(
+        (d for d in state.ai_decisions_at_forks if d.get("crisis_id") == crisis_id),
+        None
+    )
+    if existing:
+        existing["response"] = decision_summary
+        existing["day_decided"] = state.day
+    else:
+        state.ai_decisions_at_forks.append({
+            "crisis_id": crisis_id,
+            "fork_title": matching_fork["title"],
+            "day": matching_fork["day"],
+            "agent_role": agent_role,
+            "response": decision_summary,
+            "day_decided": state.day,
+        })
+
+    save_sessions()
+
+    return {
+        "recorded": True,
+        "fork_title": matching_fork["title"],
+        "historical_choice": matching_fork["what_founders_did"][:200],
+        "message": (
+            "Decision recorded. This will be compared against the real founders' choice "
+            "in the final Resurrection Report."
+        )
+    }
+
+
+@mcp.tool()
+def get_resurrection_report(episode_id: str) -> dict:
+    """
+    Generate the Resurrection Report for a postmortem scenario episode.
+    Returns a side-by-side comparison of real founder decisions vs AI agent decisions,
+    with projected outcome deltas and an overall verdict.
+
+    Args:
+        episode_id: Session identifier (must have a postmortem scenario loaded).
+    """
+    from .postmortem_scenarios import get_scenario
+    from .resurrection_engine import generate_resurrection_report
+
+    state = _get_state(episode_id)
+
+    if not state.postmortem_scenario_id:
+        return {
+            "error": "No postmortem scenario loaded for this episode.",
+            "hint": "Call 'load_postmortem_scenario' first, then run the simulation."
+        }
+
+    scenario = get_scenario(state.postmortem_scenario_id)
+    if not scenario:
+        return {"error": f"Scenario '{state.postmortem_scenario_id}' not found in registry."}
+
+    report = generate_resurrection_report(state, scenario)
+    return report
+
 # ── ASGI Bridge ─────────────────────────────────────────────────────────────
 # This allows openenv.yaml (server.app:app) to work
 if __name__ == "__main__":
