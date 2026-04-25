@@ -9,14 +9,30 @@ import argparse
 from dataclasses import dataclass, field as dc_field
 
 # ── Colab Dependency Installation ─────────────────────────────────────────────
+REPO_URL = "https://github.com/rhine-pereira/meta-hack-finale.git"
+COLAB_REPO_DIR = "/content/meta-hack-finale"
+
 def install_dependencies():
-    """Install required libraries if running in Google Colab."""
+    """Clone repo + install required libraries when running in Google Colab."""
     try:
         import google.colab
-        print("Detected Google Colab. Installing dependencies...")
+        print("Detected Google Colab. Setting up environment...")
 
         def pip(*args):
             subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *args])
+
+        # 0. Clone the project repo so server/ modules are available
+        if not os.path.isdir(COLAB_REPO_DIR):
+            print(f"  [0/3] Cloning repo → {COLAB_REPO_DIR} ...")
+            subprocess.check_call(["git", "clone", "--depth=1", REPO_URL, COLAB_REPO_DIR])
+        else:
+            print(f"  [0/3] Repo already cloned at {COLAB_REPO_DIR}, pulling latest...")
+            subprocess.check_call(["git", "-C", COLAB_REPO_DIR, "pull", "--ff-only"])
+
+        # Switch CWD to repo root so `server.app` is importable and relative paths work
+        os.chdir(COLAB_REPO_DIR)
+        if COLAB_REPO_DIR not in sys.path:
+            sys.path.insert(0, COLAB_REPO_DIR)
 
         # Colab already has CUDA-enabled PyTorch + Triton — do NOT let pip upgrade them.
         # Upgrading torch pulls in a newer Triton that generates PTX 8.7, but Colab's T4
@@ -26,14 +42,13 @@ def install_dependencies():
 
         # 1. Core Simulation & OpenEnv
         print("  [1/3] Installing OpenEnv + server deps...")
-        pip("openenv-core[core]>=0.2.3", "fastapi", "uvicorn", "requests")
+        pip("openenv-core[core]>=0.2.3", "fastapi", "uvicorn", "requests", "fastmcp")
 
         # 2. HF training stack — torch pinned to prevent Triton upgrade
         print("  [2/3] Installing trl / peft / bitsandbytes / accelerate...")
         pip(_torch_pin, "trl", "peft", "bitsandbytes", "accelerate")
 
         print("  [3/3] Dependencies complete.")
-
         print("Installation complete. Restart runtime now if prompted about version conflicts.")
     except ImportError:
         pass
@@ -246,19 +261,51 @@ def train():
 # ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     install_dependencies()
-    
-    # Start server
-    print("Starting GENESIS OpenEnv server...")
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "7860"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+
+    # Ensure we're in the repo root even when install step was skipped (re-runs)
     try:
-        # Wait for server
+        import google.colab
+        if os.path.isdir(COLAB_REPO_DIR):
+            os.chdir(COLAB_REPO_DIR)
+            if COLAB_REPO_DIR not in sys.path:
+                sys.path.insert(0, COLAB_REPO_DIR)
+    except ImportError:
+        pass
+
+    # Start server — log to file so startup errors are visible on failure
+    server_log = open("/tmp/genesis_server.log", "w") if os.path.exists("/tmp") else subprocess.DEVNULL
+    print("Starting GENESIS OpenEnv server...")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "7860"],
+        stdout=server_log, stderr=server_log,
+    )
+
+    try:
+        # Wait up to 30 s for server to become ready
         import requests
-        for _ in range(15):
+        ready = False
+        for i in range(30):
             try:
-                if requests.get("http://127.0.0.1:7860/mcp", timeout=2).status_code in (200, 405, 406): break
-            except: time.sleep(1)
-        
+                if requests.get("http://127.0.0.1:7860/mcp", timeout=2).status_code in (200, 405, 406):
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(1)
+
+        if not ready:
+            # Dump server log to help diagnose startup failures
+            try:
+                if hasattr(server_log, "name"):
+                    server_log.flush()
+                    with open(server_log.name) as f:
+                        print("\n--- Server startup log ---")
+                        print(f.read()[-3000:])
+                        print("--- End server log ---\n")
+            except Exception:
+                pass
+            raise RuntimeError("GENESIS server did not start within 30 s. See server log above.")
+
         if args.smoke:
             print("Running smoke test...")
             run_episode("ceo", '{"tool": "make_decision", "args": {"decision": "test"}}')
@@ -269,3 +316,5 @@ if __name__ == "__main__":
         print("Shutting down server...")
         proc.terminate()
         proc.wait()
+        if hasattr(server_log, "close"):
+            server_log.close()
