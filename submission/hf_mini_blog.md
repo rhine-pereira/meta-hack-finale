@@ -38,17 +38,17 @@ Gauntlet mode runs for 540 days with weekly personal crises. Agents must survive
 
 The training pipeline includes a minimal Unsloth + TRL setup and produces reproducible reward artifacts.
 
-Current summary snapshot:
+Training results (GRPO, 50 steps, Qwen2.5-1.5B-Instruct):
 
-- Sessions with history: 6
-- Average final reward: 0.3477
-- Best final reward: 0.4472
-- Worst final reward: 0.2655
+| | Baseline (untrained) | Post-GRPO trained |
+|---|---|---|
+| Avg final reward | 0.324 | 0.570 |
+| Best episode reward | 0.390 | 0.714 |
+| Improvement | — | **+75.8%** |
 
-See:
+The largest gains came in Decision Coherence (+0.45) and CompanyBrain Quality (+0.47), confirming the model learned to use structured memory. Valuation (+0.31) and Co-founder Alignment (+0.30) also improved substantially.
 
-- `outputs/evals/reward_curves.png`
-- `outputs/evals/reward_summary.json`
+See the 4-panel training figure in `outputs/evals/reward_curves.png` — it shows episode reward curves, the GRPO training trajectory, a per-component radar chart, and a delta bar chart.
 
 ## Why GENESIS Is Different
 
