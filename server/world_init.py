@@ -121,7 +121,7 @@ CUSTOMER_NAMES = [
 
 
 def initialize_world(
-    difficulty: DifficultyLevel = DifficultyLevel.SEED,
+    difficulty: DifficultyLevel = DifficultyLevel.GAUNTLET,
     seed: int = 42,
 ) -> WorldState:
     """Build a fresh WorldState from scratch for a new episode."""
@@ -131,7 +131,7 @@ def initialize_world(
     max_days_map = {1: 90, 2: 180, 3: 360, 4: 540, 5: 720}
     starting_cash_map = {1: 300_000, 2: 500_000, 3: 800_000, 4: 1_000_000, 5: 1_500_000}
     num_competitors_map = {1: 1, 2: 2, 3: 3, 4: 4, 5: 4}
-    num_customers_map = {1: 3, 2: 5, 3: 8, 4: 10, 5: 12}
+    num_customers_map = {1: 20, 2: 40, 3: 80, 4: 140, 5: 200}
     num_investors_map = {1: 4, 2: 6, 3: 8, 4: 10, 5: 12}
 
     state = WorldState(
@@ -145,11 +145,11 @@ def initialize_world(
 
     # ── Employees (founding team seed hires) ──────────────────────────
     base_hires = [
-        ("Alice Chen", "Senior Engineer", 0.85, False),
-        ("Bob Martinez", "Product Designer", 0.75, False),
-        ("Carol Wu", "Backend Engineer", 0.65, rng.random() < 0.1),
+        ("Alice Chen", "Senior Engineer", 0.85, False, 210_000),
+        ("Bob Martinez", "Product Designer", 0.75, False, 165_000),
+        ("Carol Wu", "Backend Engineer", 0.65, rng.random() < 0.1, 180_000),
     ]
-    for name, role, skill, toxic in base_hires:
+    for name, role, skill, toxic, annual_salary in base_hires:
         state.employees.append(Employee(
             id=str(uuid.uuid4()),
             name=name,
@@ -158,12 +158,13 @@ def initialize_world(
             morale=rng.uniform(0.70, 0.90),
             burnout_risk=rng.uniform(0.10, 0.30),
             is_toxic=toxic,
+            annual_salary=annual_salary,
         ))
 
     # ── Candidate pool ────────────────────────────────────────────────
     candidate_roles = ["Senior Engineer", "Sales Rep", "DevOps Engineer",
                        "ML Engineer", "Marketing Manager", "Data Analyst"]
-    for i in range(12):
+    for i in range(50):
         skill = rng.uniform(0.3, 0.95)
         toxic = rng.random() < 0.12
         state.candidate_pool.append({
@@ -177,7 +178,11 @@ def initialize_world(
         })
 
     # ── Customers ─────────────────────────────────────────────────────
-    chosen_names = rng.sample(CUSTOMER_NAMES, min(num_customers_map[level], len(CUSTOMER_NAMES)))
+    desired_customers = num_customers_map[level]
+    chosen_names = list(rng.sample(CUSTOMER_NAMES, min(desired_customers, len(CUSTOMER_NAMES))))
+    while len(chosen_names) < desired_customers:
+        chosen_names.append(f"Prospect-{len(chosen_names) + 1}")
+
     for name in chosen_names:
         arr = rng.uniform(5_000, 50_000)
         state.customers.append(Customer(
@@ -231,5 +236,7 @@ def initialize_world(
     state.company_brain["product"] = "B2B workflow automation platform for mid-market companies"
     state.company_brain["stage"] = "Seed"
     state.company_brain["target_customer"] = "Operations teams at 50-500 person companies"
+    state.company_brain["weekly_state_day_0"] = "Incorporated. Initial strategy and constraints documented."
+    state.last_weekly_memo_day = 0
 
     return state

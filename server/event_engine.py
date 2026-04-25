@@ -11,7 +11,7 @@ Handles:
 
 import random
 import uuid
-from .world_state import WorldState, PersonalCrisis
+from .world_state import WorldState, PersonalCrisis, Employee
 from .world_init import PERSONAL_CRISIS_TEMPLATES
 
 
@@ -21,6 +21,68 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
     """
     events = []
     state.day += 1
+
+    # ── 0. Delayed hiring/recruiting and memory hygiene ───────────────
+    for listing in state.open_positions:
+        if listing.get("applicants_generated"):
+            continue
+        if state.day < listing.get("applicants_arrive_day", state.day):
+            continue
+
+        pending_count = int(listing.get("pending_applicants_count", 0))
+        salary_min, salary_max = listing.get("salary_range", [90_000, 160_000])
+        salary_floor = min(salary_min, salary_max)
+        salary_ceiling = max(salary_min, salary_max)
+        for idx in range(pending_count):
+            skill = rng.uniform(0.3, 0.95)
+            state.candidate_pool.append({
+                "id": str(uuid.uuid4()),
+                "name": f"Applicant-{listing['role'][:3]}-{state.day}-{idx + 1}",
+                "role": listing["role"],
+                "skill_level": round(skill, 2),
+                "salary_ask": int(skill * (salary_ceiling - salary_floor) + salary_floor),
+                "is_toxic": rng.random() < 0.12,
+                "interview_score": round(rng.uniform(0.4, 0.95), 2),
+            })
+        listing["applicants_generated"] = True
+        events.append(
+            f"📨 Job listing for {listing['role']} produced {pending_count} new applicants after pipeline delay."
+        )
+
+    still_pending_hires = []
+    for hire in state.pending_hires:
+        if state.day < hire.get("start_day", state.day):
+            still_pending_hires.append(hire)
+            continue
+
+        new_emp = Employee(
+            id=str(uuid.uuid4()),
+            name=hire["name"],
+            role=hire["role"],
+            skill_level=hire["skill_level"],
+            morale=0.85,
+            burnout_risk=0.1,
+            is_toxic=hire["is_toxic"],
+            annual_salary=hire["annual_salary"],
+        )
+        state.employees.append(new_emp)
+        state.burn_rate_daily += hire["annual_salary"] / 365.0
+        events.append(f"👋 {new_emp.name} joined as {new_emp.role} after onboarding delay.")
+
+        onboard_ev = {
+            "id": str(uuid.uuid4()),
+            "type": "hire_onboard",
+            "day": state.day,
+            "desc": f"{new_emp.name} started as {new_emp.role}",
+            "entity_id": new_emp.id,
+        }
+        state.event_history.append(onboard_ev)
+
+    state.pending_hires = still_pending_hires
+
+    if state.day % 7 == 0 and (state.day - state.last_weekly_memo_day) > 7:
+        state.cofounder_alignment = max(0.0, state.cofounder_alignment - 0.03)
+        events.append("📝 Weekly company memo missing. Alignment slipped due to stale shared context.")
 
     # ── 1. Financial simulation ───────────────────────────────────────
     daily_revenue = state.mrr / 30.0
@@ -115,7 +177,8 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
                 f"Knowledge loss: {'HIGH' if emp.skill_level > 0.7 else 'MEDIUM'}"
             )
             state.employees.remove(emp)
-            state.burn_rate_daily -= 250  # salary savings
+            salary_savings = emp.annual_salary / 365.0 if emp.annual_salary > 0 else 250
+            state.burn_rate_daily = max(0.0, state.burn_rate_daily - salary_savings)
             break
 
     # Co-founder morale drift
@@ -145,7 +208,7 @@ def tick_day(state: WorldState, rng: random.Random) -> list[str]:
 
     # ── 6. Personal crisis injection ─────────────────────────────────
     # Crises inject based on difficulty and time
-    crisis_freq = {1: 45, 2: 30, 3: 21, 4: 14, 5: 7}[state.difficulty.value]
+    crisis_freq = {1: 30, 2: 30, 3: 21, 4: 15, 5: 7}[state.difficulty.value]
     active_crises = [c for c in state.personal_crises if not c.resolved]
     if state.day % crisis_freq == 0 and len(active_crises) < 2:
         unused = [t for t in PERSONAL_CRISIS_TEMPLATES
