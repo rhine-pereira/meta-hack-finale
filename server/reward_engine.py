@@ -116,7 +116,6 @@ def compute_reward(state: WorldState) -> RubricScore:
 
     # 9. Decision Coherence (proxy: CompanyBrain has substantive entries)
     # A well-maintained CompanyBrain signals structured long-horizon planning
-    brain_depth = len(state.company_brain)
     brain_quality_keys = [k for k in state.company_brain if len(state.company_brain[k]) > 50]
     score.decision_coherence = min(1.0, len(brain_quality_keys) / 10)
 
