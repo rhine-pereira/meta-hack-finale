@@ -3,7 +3,7 @@ export class GenesisClient {
   private sessionId: string | null = null;
   private requestId = 0;
 
-  constructor(baseUrl = "http://localhost:7860") {
+  constructor(baseUrl = process.env.NEXT_PUBLIC_GENESIS_URL || "http://localhost:7860") {
     this.baseUrl = baseUrl;
   }
 

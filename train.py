@@ -68,8 +68,11 @@ args, _ = parser.parse_known_args()
 from client import GenesisEnv
 
 
-def _create_env_client(base_url: str = "http://127.0.0.1:7860"):
+def _create_env_client(base_url: str = None):
     """Create a sync OpenEnv MCP client in production mode (/mcp HTTP JSON-RPC)."""
+    if base_url is None:
+        port = os.environ.get("GENESIS_PORT", "7860")
+        base_url = f"http://127.0.0.1:{port}"
     env = GenesisEnv(base_url=base_url).sync()
     env.async_client.use_production_mode = True
     return env
@@ -545,26 +548,37 @@ def train():
 # ── Server Lifecycle ──────────────────────────────────────────────────────────
 
 def start_openenv_server():
-    """Start the GENESIS MCP server in a background process."""
-    print("Starting GENESIS OpenEnv server (uvicorn server.app:app)...")
+    """Start the GENESIS MCP server in a background process if not already running."""
+    port = os.environ.get("GENESIS_PORT", "7860")
+    host = "127.0.0.1"
+    url = f"http://{host}:{port}"
+    
+    import requests
+    try:
+        # FastMCP ready check
+        response = requests.get(f"{url}/mcp", timeout=1)
+        if response.status_code in (200, 405, 406):
+            print(f"Using existing GENESIS server at {url}")
+            return None
+    except requests.exceptions.RequestException:
+        pass
+
+    print(f"Starting GENESIS OpenEnv server (uvicorn server.app:app) on port {port}...")
     # Clean up old session files to ensure a fresh state
     if os.path.exists("sessions.pkl"):
         os.remove("sessions.pkl")
         
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", "7860", "--log-level", "warning"],
+        [sys.executable, "-m", "uvicorn", "server.app:app", "--host", host, "--port", port, "--log-level", "warning"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
     
     # Wait for server to be ready
-    import requests
     max_retries = 15
     for i in range(max_retries):
         try:
-            # FastMCP is considered ready when /mcp responds.
-            # GET usually returns 406 (missing Accept: text/event-stream), which is expected.
-            response = requests.get("http://127.0.0.1:7860/mcp", timeout=2)
+            response = requests.get(f"{url}/mcp", timeout=2)
             if response.status_code in (200, 405, 406):
                 print("Server ready.")
                 return proc
@@ -574,7 +588,7 @@ def start_openenv_server():
             time.sleep(1)
             
     proc.terminate()
-    raise RuntimeError("Failed to start GENESIS server after 15 seconds.")
+    raise RuntimeError(f"Failed to start GENESIS server on port {port} after 15 seconds.")
 
 
 # ── Entry Point ───────────────────────────────────────────────────────────────

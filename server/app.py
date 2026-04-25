@@ -23,6 +23,7 @@ from .genome_utils import aggregate_genome, generate_radar_chart, generate_compa
 
 # ── Global Registry ──────────────────────────────────────────────────────────
 from fastapi import Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 # Create the FastMCP instance
@@ -30,6 +31,11 @@ mcp = FastMCP("genesis")
 
 # Get the underlying FastAPI app from FastMCP
 app = mcp.http_app()
+
+# Serve exported artifacts (Founder Genome cards, etc.)
+# This enables the UI to fetch e.g. /exports/founder_genomes/genome_<model>_<ts>.png
+os.makedirs("exports", exist_ok=True)
+app.mount("/exports", StaticFiles(directory="exports"), name="exports")
 
 # Add CORS for local training compliance
 app.add_middleware(
@@ -1199,6 +1205,26 @@ def hold_one_on_one(episode_id: str, agent_role: str, employee_id: str, talking_
         "feedback": feedback,
         "message": f"1-on-1 with {emp.name} completed."
     }
+
+@mcp.tool()
+def list_founder_genomes() -> dict:
+    """
+    List all model identifiers that have exported Founder Genomes.
+    """
+    export_dir = "exports/founder_genomes"
+    if not os.path.exists(export_dir):
+        return {"model_ids": []}
+    
+    files = os.listdir(export_dir)
+    model_ids = set()
+    for f in files:
+        if f.startswith("genome_") and f.endswith(".json"):
+            # Format: genome_modelid_timestamp.json
+            parts = f.split("_")
+            if len(parts) >= 3:
+                model_ids.add(parts[1])
+    
+    return {"model_ids": sorted(list(model_ids))}
 
 # ── Task 9: Founder Genome (USP 3) ───────────────────────────────────────────
 
