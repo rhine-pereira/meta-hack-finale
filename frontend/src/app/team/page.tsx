@@ -20,8 +20,32 @@ import {
 
 export default function Team() {
   const { 
-    employees, candidatePool, cofounderMorale, hireCandidate
+    employees, candidatePool, cofounderMorale, hireCandidate,
+    postJobListing, holdOneOnOne, fireEmployee
   } = useGenesisStore();
+
+  const handlePostJob = async () => {
+    const role = prompt("Job Role?", "Senior Neural Engineer");
+    if (!role) return;
+    const reqs = prompt("Requirements?", "Experience with GRPO and simulation environments.");
+    if (!reqs) return;
+    const salary = prompt("Salary Range?", "$150k - $220k");
+    if (!salary) return;
+    
+    await postJobListing(role, reqs, salary);
+    alert("Job listing posted: " + role);
+  };
+
+  const handleHoldOneOnOne = async (empId: string, empName: string) => {
+    await holdOneOnOne(empId);
+    alert("Held 1:1 session with " + empName);
+  };
+
+  const handleFireEmployee = async (empId: string, empName: string) => {
+    if (!confirm(`Are you sure you want to terminate ${empName}? This action is irreversible.`)) return;
+    await fireEmployee(empId);
+    alert(empName + " has been terminated.");
+  };
 
   const avgMorale = employees.length > 0 
     ? employees.reduce((acc, e) => acc + e.morale, 0) / employees.length 
@@ -37,7 +61,10 @@ export default function Team() {
            </div>
            <div className="flex gap-2">
               <BackToDashboard />
-              <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2">
+              <button 
+                onClick={handlePostJob}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors flex items-center gap-2"
+              >
                 <UserPlus size={16} />
                 Post Job
               </button>
@@ -137,10 +164,16 @@ export default function Team() {
                           <div className="mt-6 pt-4 border-t border-border-dim flex justify-between items-center">
                              <div className="text-[9px] text-text-muted font-mono uppercase">Tenure: {emp.months_employed}M</div>
                              <div className="flex gap-2">
-                                <button className="p-1.5 rounded bg-bg-void border border-border-dim hover:border-accent transition-all text-text-secondary hover:text-accent">
+                                <button 
+                                  onClick={() => handleHoldOneOnOne(emp.id, emp.name)}
+                                  className="p-1.5 rounded bg-bg-void border border-border-dim hover:border-accent transition-all text-text-secondary hover:text-accent"
+                                >
                                    <Briefcase size={14} />
                                 </button>
-                                <button className="p-1.5 rounded bg-bg-void border border-border-dim hover:border-signal-red transition-all text-text-secondary hover:text-signal-red">
+                                <button 
+                                  onClick={() => handleFireEmployee(emp.id, emp.name)}
+                                  className="p-1.5 rounded bg-bg-void border border-border-dim hover:border-signal-red transition-all text-text-secondary hover:text-signal-red"
+                                >
                                    <UserX size={14} />
                                 </button>
                              </div>
@@ -154,15 +187,17 @@ export default function Team() {
            <div className="col-span-12 xl:col-span-4 flex flex-col gap-6">
               <div className="glass-panel p-5 rounded-xl">
                  <h3 className="text-[10px] text-text-muted font-bold uppercase tracking-widest mb-4 flex justify-between items-center">
-                    Org Morale Trend
-                    <span className="text-signal-amber flex items-center gap-1 text-[9px]">
-                       <TrendingUp size={12} className="rotate-180" /> -2.4%
-                    </span>
+                    Team Morale Indices
                  </h3>
-                 <div className="h-24 w-full flex items-end justify-between gap-1 border-b border-l border-border-dim/50 p-2">
-                    {/* Simulated bars */}
-                    {[40, 45, 38, 52, 48, 60, 55, 42].map((h, i) => (
-                       <div key={i} className="flex-1 bg-signal-amber/20 border-t border-signal-amber/50" style={{ height: `${h}%` }} />
+                 <div className="grid grid-cols-5 gap-2">
+                    {Object.entries(cofounderMorale).map(([role, morale]) => (
+                       <div key={role} className="flex flex-col items-center gap-1">
+                          <div className={cn(
+                             "w-full h-1 rounded-full",
+                             morale > 0.6 ? "bg-signal-green" : morale > 0.3 ? "bg-signal-amber" : "bg-signal-red"
+                          )} style={{ height: '4px' }} />
+                          <span className="text-[8px] uppercase font-bold text-text-muted">{role}</span>
+                       </div>
                     ))}
                  </div>
               </div>

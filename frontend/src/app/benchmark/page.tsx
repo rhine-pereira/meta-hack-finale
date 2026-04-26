@@ -14,6 +14,12 @@ import {
 } from "lucide-react";
 
 export default function Benchmark() {
+  const { availableModels, listFounderGenomes, leafCount } = useGenesisStore();
+
+  React.useEffect(() => {
+    listFounderGenomes();
+  }, [listFounderGenomes]);
+
   return (
     <MainLayout>
       <div className="flex flex-col gap-6">
@@ -37,8 +43,8 @@ export default function Benchmark() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { label: "Aggregate Episodes", value: "256", icon: Target, color: "text-accent" },
-            { label: "Active Models", value: "12", icon: Cpu, color: "text-signal-blue" },
+            { label: "Aggregate Episodes", value: leafCount || "0", icon: Target, color: "text-accent" },
+            { label: "Available Models", value: availableModels.length, icon: Cpu, color: "text-signal-blue" },
             { label: "Benchmark Difficulty", value: "GAUNTLET", icon: Trophy, color: "text-signal-amber" },
           ].map((kpi, i) => (
             <div key={i} className="glass-panel p-5 rounded-xl flex items-center gap-5">
@@ -72,8 +78,8 @@ export default function Benchmark() {
               
               <div className="space-y-4 text-[10px] text-text-secondary leading-relaxed font-mono">
                 <p>
-                  Genomes are computed by aggregating all reward components across N episodes. 
-                  The <span className="text-accent">Differentiator</span> identifies behavioral divergence in high-pressure scenarios (Pivots, Market Shocks).
+                  Genomes are computed by aggregating all reward components across episodes. 
+                  The <span className="text-accent">Differentiator</span> identifies behavioral divergence in high-pressure scenarios.
                 </p>
                 <div className="space-y-2 pt-2">
                   <div className="flex items-center gap-2">
@@ -88,20 +94,6 @@ export default function Benchmark() {
                     <div className="w-1 h-1 rounded-full bg-accent" />
                     <span>VERIFICATION: ON-CHAIN CHECKPOINTS</span>
                   </div>
-                </div>
-              </div>
-
-              <div className="mt-8">
-                <div className="text-[9px] font-black text-text-muted uppercase mb-3">Model Distribution</div>
-                <div className="flex h-1.5 w-full bg-bg-void rounded-full overflow-hidden border border-border-dim">
-                  <div className="h-full bg-accent" style={{ width: "45%" }} />
-                  <div className="h-full bg-signal-amber" style={{ width: "30%" }} />
-                  <div className="h-full bg-signal-blue" style={{ width: "25%" }} />
-                </div>
-                <div className="flex justify-between mt-2 text-[8px] font-mono text-text-muted">
-                  <span>CLAUDE</span>
-                  <span>GPT</span>
-                  <span>GEMINI</span>
                 </div>
               </div>
             </div>

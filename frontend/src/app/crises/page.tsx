@@ -13,7 +13,6 @@ import {
   Ban, 
   Clock, 
   Activity,
-  EmergencyIcon,
   ChevronRight,
   Filter
 } from "lucide-react";
@@ -37,21 +36,15 @@ export default function Crises() {
            </div>
            <div className="flex gap-2">
               <BackToDashboard />
-              <button className="px-4 py-2 rounded bg-signal-red/10 border border-signal-red/30 text-signal-red font-bold text-xs uppercase tracking-widest hover:bg-signal-red/20 transition-all flex items-center gap-2">
-                <Emergency size={16} />
-                Override All
-              </button>
            </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
            {[
              { label: "Active Crises", value: activeCrises.length, color: "text-signal-red" },
-             { label: "Resolved (24h)", value: resolvedCrises.length, color: "text-signal-green" },
-             { label: "Ignored (Life)", value: ignoredCrises.length, color: "text-text-muted" },
-             { label: "System Load", value: "92%", color: "text-signal-blue" },
-             { label: "Response T", value: "4.2h", color: "text-text-primary" },
-             { label: "Stability", value: "84%", color: "text-signal-amber" },
+             { label: "Resolved (Total)", value: resolvedCrises.length, color: "text-signal-green" },
+             { label: "Ignored (Total)", value: ignoredCrises.length, color: "text-text-muted" },
+             { label: "Total Handled", value: personalCrises.length, color: "text-signal-blue" },
            ].map((kpi, i) => (
              <div key={i} className="glass-panel p-3 rounded-lg flex flex-col items-center justify-center text-center">
                 <div className="text-[9px] text-text-muted uppercase font-black mb-1">{kpi.label}</div>
@@ -127,7 +120,6 @@ export default function Crises() {
                              >
                                Intervene Now
                              </button>
-                             <button className="bg-bg-void border border-border-dim text-text-primary font-black text-[10px] uppercase tracking-widest px-6 py-2.5 rounded hover:bg-bg-hover transition-all">Delegate Role</button>
                           </div>
                        </motion.div>
                     ))
@@ -171,48 +163,30 @@ export default function Crises() {
            </div>
 
            <div className="lg:col-span-4 flex flex-col gap-6">
-              <div className="glass-panel p-6 rounded-xl flex flex-col">
-                 <h3 className="text-sm font-black text-text-primary uppercase mb-6 tracking-tight">Resolution Efficiency</h3>
-                 <div className="space-y-6">
-                    {[
-                       { label: "Autonomous (AI)", value: 45, max: 60, color: "bg-signal-green" },
-                       { label: "Directed (Manual)", value: 12, max: 60, color: "bg-accent" },
-                       { label: "Auto-Cleared", value: 89, max: 100, color: "bg-text-muted" },
-                    ].map((item, i) => (
-                       <div key={i}>
-                          <div className="flex justify-between text-[10px] font-black text-text-muted uppercase mb-2">
-                             <span>{item.label}</span>
-                             <span>{item.value}</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-bg-void rounded-full overflow-hidden border border-border-dim">
-                             <motion.div 
-                                initial={{ width: 0 }}
-                                animate={{ width: `${(item.value / item.max) * 100}%` }}
-                                className={cn("h-full", item.color)}
-                             />
-                          </div>
-                       </div>
-                    ))}
-                 </div>
-              </div>
-
               <div className="glass-panel p-6 rounded-xl flex-1 flex flex-col">
                  <h3 className="text-sm font-black text-text-primary uppercase mb-6 tracking-tight">Recently Mitigated</h3>
                  <div className="space-y-3">
-                    {[
-                       { label: "RESOLVED", text: "Supply Chain Disruption - Asia", color: "text-signal-green", icon: CheckCircle2 },
-                       { label: "IGNORED", text: "Minor PR Sentiment Dip", color: "text-text-muted", icon: Ban },
-                       { label: "RESOLVED", text: "Compliance Audit Flag", color: "text-signal-green", icon: CheckCircle2 },
-                       { label: "MITIGATED", text: "Competitor Poaching Attempt", color: "text-signal-blue", icon: Activity },
-                    ].map((item, i) => (
+                    {[...resolvedCrises, ...ignoredCrises].slice(0, 8).map((crisis, i) => (
                        <div key={i} className="p-3 rounded bg-bg-void/40 border border-border-dim flex justify-between items-center opacity-60 hover:opacity-100 transition-opacity">
-                          <div>
-                             <div className={cn("text-[9px] font-black uppercase mb-1", item.color)}>{item.label}</div>
-                             <div className="text-[11px] font-medium text-text-secondary">{item.text}</div>
+                          <div className="flex-1 pr-4">
+                             <div className={cn(
+                                "text-[9px] font-black uppercase mb-1", 
+                                crisis.resolved ? "text-signal-green" : "text-text-muted"
+                             )}>
+                                {crisis.resolved ? "RESOLVED" : "IGNORED"}
+                             </div>
+                             <div className="text-[11px] font-medium text-text-secondary line-clamp-2">{crisis.description}</div>
                           </div>
-                          <item.icon size={16} className={item.color} />
+                          {crisis.resolved ? (
+                             <CheckCircle2 size={16} className="text-signal-green flex-shrink-0" />
+                          ) : (
+                             <Ban size={16} className="text-text-muted flex-shrink-0" />
+                          )}
                        </div>
                     ))}
+                    {[...resolvedCrises, ...ignoredCrises].length === 0 && (
+                       <div className="text-[10px] text-text-muted uppercase italic text-center py-10">No history available</div>
+                    )}
                  </div>
               </div>
            </div>

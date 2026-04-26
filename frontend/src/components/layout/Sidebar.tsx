@@ -11,7 +11,6 @@ import {
   Briefcase, 
   BrainCircuit, 
   HelpCircle,
-  AlertTriangle,
   History,
   Activity,
   TrendingUp,
@@ -114,10 +113,6 @@ export const Sidebar = () => {
             ))}
           </div>
         </div>
-        <button className="w-full py-2.5 bg-signal-red/10 border border-signal-red/30 text-signal-red font-mono text-[10px] font-bold tracking-widest hover:bg-signal-red/20 transition-all flex items-center justify-center gap-2 rounded uppercase">
-          <AlertTriangle size={14} />
-          EMERGENCY OVERRIDE
-        </button>
       </div>
     </aside>
   );
