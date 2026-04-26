@@ -36,7 +36,8 @@ export class GenesisClient {
         this.sessionId = res.headers.get("mcp-session-id");
         const text = await res.text();
         const data = this.parseResponse(text);
-        console.log("MCP Initialized:", data);
+        console.log("MCP Initialized. Session ID:", this.sessionId);
+        console.log("MCP Init Data:", data);
 
         // Complete initialization handshake
         await fetch(`${this.baseUrl}/mcp`, {
