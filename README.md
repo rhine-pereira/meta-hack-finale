@@ -90,7 +90,7 @@ From the hackathon PDF, teams are scored as follows. Below is a direct **crosswa
 |--------|------------|------------------|
 | **40%** | **Environment innovation** — novel, creative, challenging; tests agent behavior | First-class **startup operator** simulation: partial observability, **pivot**, **persona crises**, **28 tools**, **MarketMaker**; not a grid-world or a single-turn QA task. |
 | **30%** | **Storytelling** — clear problem, environment, and agent behavior; engaging demo | This README, `submission/hf_mini_blog.md`, and `submission/demo_video_script.md`; **HF Space** for live interaction. |
-| **20%** | **Improvement in rewards** � evidence of training progress (curves, metrics, before/after) | 4-panel figure in outputs/evals/reward_curves.png: episode curves baseline vs trained, GRPO training curve, per-component radar, and per-component delta bar chart. **+75.8% improvement** (0.324 → 0.570 avg final reward). scripts/plot_rewards.py --demo regenerates all artifacts. |
+| **20%** | **Improvement in rewards** — evidence of training progress (curves, metrics, before/after) | Real evaluation artifacts in `outputs/evals/` (generated from `sessions.pkl`). `outputs/evals/reward_curves.png` shows per-episode curves and final-reward scatter, **grouped by `model_id`** for clean comparisons; `outputs/evals/reward_summary.json` includes per-model averages. |
 | **10%** | **Reward + pipeline** — coherent reward, meaningful change in **inference** behavior | `server/reward_engine.py` documents weights and **normalization**; `train.py` uses **GRPO** with environment reward; smoke path for CI/local validation. |
 
 **Minimum requirements (PDF):** OpenEnv (latest) · minimal training in **Colab** with **Unsloth** or **HF TRL** · mini-blog or **&lt;2 min** video · environment on **Hugging Face Spaces**. This project includes `openenv.yaml`, `colab/training.ipynb`, `train.py`, `train_colab.py`, and the submission docs above.
@@ -360,28 +360,25 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 | **Reward curve image** | `outputs/evals/reward_curves.png` |
 | **Reward summary** | `outputs/evals/reward_summary.json` |
 
-**Snapshot of committed training metrics (regenerate with `python scripts/plot_rewards.py --demo`):**
+**Snapshot of evaluation metrics (regenerate with `python scripts/plot_rewards.py --sessions sessions.pkl --out outputs/evals --summarize-models`):**
 
-| Metric | Value |
-|--------|-------|
-| Baseline episodes | 6 |
-| Post-GRPO trained episodes | 12 |
-| Baseline avg final reward | 0.3241 |
-| Trained avg final reward | 0.5696 |
-| **Improvement over baseline** | **+75.8%** |
-| Best trained reward | 0.7139 |
+| Metric | Value (this repo) |
+|--------|-------------------|
+| Sessions with history | 110 |
+| Avg final reward (all) | 0.4547 |
+| Best / worst final reward (all) | 0.5022 / 0.2875 |
+| Baseline (`baseline_static`) avg final reward | 0.4610 (n=40) |
+| Ollama `mistral:latest` avg final reward | 0.4707 (n=31) |
+| Ollama `deepseek-coder:6.7b` avg final reward | 0.4604 (n=30) |
 
-> Artifacts produced by a seeded simulation (`--seed 42`) that mirrors the trajectory of the real Colab run.
-> Re-run `python scripts/plot_rewards.py --demo` to regenerate, or point `--sessions sessions.pkl` at a real training log.
+> These numbers come from local GPU rollouts (Ollama) tagged with `model_id` and evaluated under identical settings (same difficulty, episode length, and seed range).
 
-### Training evidence (4-panel figure)
+### Evaluation evidence (model-wise figure)
 
 ![GENESIS reward curves](outputs/evals/reward_curves.png)
 
-*Top-left: per-episode reward curves — baseline (red) vs GRPO-trained (purple), with ±1 std band and smoothed mean.
-Top-right: final reward by episode number; dashed line marks training start; teal moving average shows upward trend.
-Bottom-left: per-component radar chart — trained agent (filled purple) dominates baseline (dashed red) on every axis.
-Bottom-right: per-component Δ (trained − baseline) — Decision Coherence and CompanyBrain Quality show largest absolute gains, confirming the agent learned to use structured memory.*
+*Left: reward curves grouped by `model_id` (mean ± std with moving average) to avoid mixed-model confusion.
+Right: final reward per episode colored by `model_id` for a clean head-to-head comparison.*
 
 ---
 
