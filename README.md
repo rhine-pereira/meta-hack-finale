@@ -2,15 +2,15 @@
 
 **Training LLMs to build, break, and rebuild companies from zero**
 
-[![OpenEnv](https://img.shields.io/badge/OpenEnv-compatible-6366f1)](https://huggingface.co/openenv) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![OpenEnv](https://img.shields.io/badge/OpenEnv-compatible-6366f1)](https://huggingface.co/openenv) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb)
 
-[OpenEnv hackathon (India 2026)](https://huggingface.co/openenv) · **Hugging Face Space:** [`https://huggingface.co/spaces/rhine-pereira/genesis_env`](https://huggingface.co/spaces/rhine-pereira/genesis_env)
+[OpenEnv hackathon (India 2026)](https://huggingface.co/openenv) · **Hugging Face Space:** [`https://huggingface.co/spaces/rhine-pereira/genesis_env`](https://huggingface.co/spaces/rhine-pereira/genesis_env) · **Training Colab:** [`colab/training.ipynb`](colab/training.ipynb)
 
 ---
 
 ## What this is (one paragraph)
 
-> Most startups do not fail because the technology was wrong; they fail because **coordination, planning, and human management** were wrong under uncertainty. **GENESIS** is an [OpenEnv](https://huggingface.co/openenv)-compliant environment in which **five role-specialized LLM agents** co-found a B2B SaaS company: they manage runway and fundraising, ship product with realistic **tech-debt and morale tradeoffs**, negotiate with a simulated market, handle **personally and ethically charged crises**, and may **pivot** mid-episode. The world is **stateful and causal** (actions have delayed side effects), **partially observable** (each role sees a filtered slice of state), and **adversarially teachable** via a **MarketMaker** that escalates scenario difficulty. The repository ships a **FastMCP** server, a **composable 11-dimensional reward** aligned with the design doc, a **GRPO** training path (Unsloth + TRL), Colab-friendly scripts, and **observable training artifacts** (curves and summary metrics).
+> Most startups do not fail because the technology was wrong; they fail because **coordination, planning, and human management** were wrong under uncertainty. **GENESIS** is an [OpenEnv](https://huggingface.co/openenv)-compliant environment in which **five role-specialized LLM agents** co-found a B2B SaaS company: they manage runway and fundraising, ship product with realistic **tech-debt and morale tradeoffs**, negotiate with a simulated market, handle **personally and ethically charged crises**, and may **pivot** mid-episode. The world is **stateful and causal** (actions have delayed side effects), **partially observable** (each role sees a filtered slice of state), and **adversarially teachable** via a **MarketMaker** that escalates scenario difficulty. The repository ships a **FastMCP** server with **42 MCP tools**, a **composable 11-dimensional reward** aligned with the design doc, a **GRPO** training path (**Unsloth** + TRL), Colab-friendly scripts with auto-generated training-evidence plots, and **observable training artifacts** (reward curves, per-step logs, and summary metrics).
 
 This README is the primary narrative artifact for the submission: it ties the **codebase** to the **problem statement** (`context/hackathon_idea_3.md`), the **official hackathon themes** (extract in `pdf_text.txt`), and the **published judging rubric**.
 
@@ -24,7 +24,7 @@ This README is the primary narrative artifact for the submission: it ties the **
 4. [How this maps the official judging criteria (40 / 30 / 20 / 10)](#how-this-maps-the-official-judging-criteria-40--30--20--10)
 5. [Architecture (runtime and modules)](#architecture-runtime-and-modules)
 6. [The five agent roles, partial observability, and hidden incentives](#the-five-agent-roles-partial-observability-and-hidden-incentives)
-7. [The 28 MCP tools (agent API)](#the-28-mcp-tools-agent-api)
+7. [The 42 MCP tools (agent API)](#the-42-mcp-tools-agent-api)
 8. [World model: state, time, and causality](#world-model-state-time-and-causality)
 9. [Personal and ethical scenarios (Theme 3.2)](#personal-and-ethical-scenarios-theme-32)
 10. [MarketMaker (adaptive curriculum, Theme 4)](#marketmaker-adaptive-curriculum-theme-4)
@@ -73,7 +73,7 @@ The hackathon document (`pdf_text.txt`) defines **five themes** and encourages s
 |-------|----------------|-------------------------|
 | **#1** | **Multi-agent** — cooperation, competition, negotiation, coalitions, partial observability | Five agents with **role-based views**; **messaging**; conflicting incentives in the spec (e.g. speed vs. quality, growth vs. runway); must coordinate via **shared memory** and comms. |
 | **#2** | **Long-horizon planning** — sparse/delayed rewards, many decisions, recovery from early mistakes | **Multi-day episodes**, delayed consequences in `event_engine` (burn, hiring pipelines, pivot fallout); rubric includes **decision coherence** and **CompanyBrain** usage as proxies for durable planning. |
-| **#3.1** | **World modeling (professional)** — real tools, APIs, no shortcuts | **28 MCP tools** (engineering, GTM, finance, people, memory); actions change **durable state**, not a one-line win condition. |
+| **#3.1** | **World modeling (professional)** — real tools, APIs, no shortcuts | **42 MCP tools** (engineering, GTM, finance, people, memory, proofs, genome, resurrection); actions change **durable state**, not a one-line win condition. |
 | **#3.2** | **World modeling (personal)** | **Eight** crisis **templates** (retention, ethics, family conflict, press, etc.) with **scored** responses. |
 | **#4** | **Self-improvement** | **MarketMaker** observes state/reward and **escalates**; training script maintains **self-play** state (e.g. difficulty promotion/demotion) in `train.py`. |
 | **#5** | **Wild card** | **Pivots** with rubric **PivotExecution**; optional collective vote parameter in the tool. |
@@ -88,7 +88,7 @@ From the hackathon PDF, teams are scored as follows. Below is a direct **crosswa
 
 | Weight | Criterion | GENESIS evidence |
 |--------|------------|------------------|
-| **40%** | **Environment innovation** — novel, creative, challenging; tests agent behavior | First-class **startup operator** simulation: partial observability, **pivot**, **persona crises**, **28 tools**, **MarketMaker**; not a grid-world or a single-turn QA task. |
+| **40%** | **Environment innovation** — novel, creative, challenging; tests agent behavior | First-class **startup operator** simulation: partial observability, **pivot**, **persona crises**, **42 tools**, **MarketMaker**, **Founder Genome benchmark**, **Dead Startup Resurrection**, **Ghost Founder HitL**; not a grid-world or a single-turn QA task. |
 | **30%** | **Storytelling** — clear problem, environment, and agent behavior; engaging demo | This README, `submission/hf_mini_blog.md`, and `submission/demo_video_script.md`; **HF Space** for live interaction. |
 | **20%** | **Improvement in rewards** — evidence of training progress (curves, metrics, before/after) | Real evaluation artifacts in `outputs/evals/` (generated from `sessions.pkl`). `outputs/evals/reward_curves.png` shows per-episode curves and final-reward scatter, **grouped by `model_id`** for clean comparisons; `outputs/evals/reward_summary.json` includes per-model averages. |
 | **10%** | **Reward + pipeline** — coherent reward, meaningful change in **inference** behavior | `server/reward_engine.py` documents weights and **normalization**; `train.py` uses **GRPO** with environment reward; smoke path for CI/local validation. |
@@ -116,7 +116,7 @@ From the hackathon PDF, teams are scored as follows. Below is a direct **crosswa
 │  11-term weighted rubric         Customers, investors,          │
 │                                    competitors, crisis templates  │
 ├──────────────────────────────────────────────────────────────────┤
-│  28 MCP tools  ←→  `GenesisEnv` / OpenEnv MCPToolClient         │
+│  42 MCP tools  ←→  `GenesisEnv` / OpenEnv MCPToolClient         │
 │                    (`client.py` / `train_colab.py` inline)        │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -140,7 +140,7 @@ From the hackathon PDF, teams are scored as follows. Below is a direct **crosswa
 
 ---
 
-## The 28 MCP tools (agent API)
+## The 42 MCP tools (agent API)
 
 Tools are registered on the **FastMCP** server; clients call them via the **MCP** JSON-RPC surface (OpenEnv client).
 
@@ -154,8 +154,13 @@ Tools are registered on the **FastMCP** server; clients call them via the **MCP*
 | **People** | `hire_candidate`, `fire_employee`, `check_team_morale`, `post_job_listing`, `conduct_interview`, `hold_one_on_one` |
 | **Strategy** | `pivot_company`, `handle_personal_crisis` |
 | **Shared memory** | `write_company_brain`, `read_company_brain` |
+| **Founder Genome (USP)** | `list_founder_genomes`, `export_founder_genome`, `compare_founder_genomes` |
+| **Blockchain proofs** | `commit_simulation_proof`, `get_simulation_proof_status` |
+| **Dead Startup Resurrection** | `list_postmortem_scenarios`, `load_postmortem_scenario`, `record_fork_decision`, `get_resurrection_report` |
+| **Ghost Founder (HitL)** | `set_role_controller`, `get_role_controllers`, `log_human_action` |
+| **ML inference** | `ml_model_status`, `ml_generate_decision` |
 
-`train.py` restricts training-time tool use to a **stability subset** and mirrors **per-role** allowlists; the **full** server surface remains available for full agents and for Space demos.
+`train.py` restricts training-time tool use to a **stability subset** (13 tools) and mirrors **per-role** allowlists; the **full** 42-tool server surface remains available for full agents and for Space demos.
 
 ---
 
@@ -237,9 +242,11 @@ Use the `export_founder_genome(model_id="qwen2.5-7b")` tool to aggregate session
 | Artifact | Purpose |
 |----------|---------|
 | **`train.py`** | **GRPO** (TRL) on Unsloth-compatible models; **Windows** Triton **mock** for local dev; connects to a running server via `GenesisEnv`; **SelfPlayState** and role-scoped **ALLOWED_TOOLS**. |
-| **`train_colab.py`** | **Colab-first**: clone/pull repo, **pin** `torch` to Colab’s build to **avoid Triton/PTX** mismatches, inline **GenesisEnv** for MCP, same training idea as `train.py`. |
-| **`colab/training.ipynb`** | Notebook path for the hackathon’s **“minimal training in Colab”** requirement. |
-| **`scripts/plot_rewards.py`** | Builds **`outputs/evals/reward_curves.png`** and **`outputs/evals/reward_summary.json`**. |
+| **`train_colab.py`** | **Colab-first** (Unsloth + TRL): bootstraps deps, starts the OpenEnv MCP server, runs **GRPO** with the GENESIS reward, logs every reward-fn call to `outputs/evals/training_log.jsonl`, and renders **`outputs/evals/training_progress.png`** automatically. Pins `torch` to Colab's build to avoid Triton/PTX mismatches. Falls back to vanilla bitsandbytes if Unsloth is unavailable. |
+| **`colab/training.ipynb`** | The **canonical submission notebook** — 10 cells, end-to-end on a free T4: GPU check → repo clone → deps → smoke test → 60-step GRPO training → inline plots → optional HF Hub upload, plus a **Troubleshooting** section. |
+| **`scripts/plot_rewards.py`** | Builds **`outputs/evals/reward_curves.png`** and **`outputs/evals/reward_summary.json`** from the persisted MCP `sessions.pkl`. Supports `--summarize-models` for per-`model_id` breakdowns. |
+
+**Run the full Colab notebook (recommended for judges):** open [`colab/training.ipynb`](colab/training.ipynb) in Colab → set runtime to **T4 GPU** → run all. ~10–18 min end-to-end on a free T4. Produces `outputs/evals/training_progress.png`, `outputs/evals/reward_curves.png`, `outputs/evals/reward_summary.json`, and a saved LoRA adapter under `genesis-checkpoints/final/`.
 
 **Typical local checks:**
 
@@ -259,11 +266,16 @@ python train.py --steps 50
 ```
 
 ```bash
-# Regenerate evaluation plots (expects session logs as implemented)
-python scripts/plot_rewards.py --sessions sessions.pkl --out outputs/evals
+# One-shot: train_colab.py boots the server itself, runs GRPO, plots curves
+python train_colab.py --steps 60 --episode-days 20 --num-generations 2
 ```
 
-**Defaults (from `train.py` args):** e.g. `unsloth/Qwen2.5-7B-Instruct-bnb-4bit`, **difficulty** levels **1–5**, configurable **`--episode-days`** for shorter **rollouts** during iteration.
+```bash
+# Regenerate evaluation plots (expects session logs as implemented)
+python scripts/plot_rewards.py --sessions sessions.pkl --out outputs/evals --summarize-models
+```
+
+**Defaults:** `train_colab.py` uses `unsloth/Qwen2.5-3B-Instruct-bnb-4bit` (free T4 fits). `train.py` uses `Qwen/Qwen2.5-3B-Instruct`. Both expose **`--difficulty`** (1–5) and **`--episode-days`** for shorter rollouts during iteration.
 
 ---
 
@@ -322,7 +334,7 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 
 ```
 ├── server/
-│   ├── app.py            # FastMCP server, 28 tools, session handling
+│   ├── app.py            # FastMCP server, 42 tools, session handling
 │   ├── world_state.py    # WorldState, employees, customers, rubric inputs
 │   ├── world_init.py     # Seeding, investors, crisis templates
 │   ├── event_engine.py   # Daily tick, delays, events
@@ -355,10 +367,14 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 | Item | Location / URL |
 |------|----------------|
 | **Hugging Face Space** | [`https://huggingface.co/spaces/rhine-pereira/genesis_env`](https://huggingface.co/spaces/rhine-pereira/genesis_env) |
-| **Mini-blog (publishable)** | `submission/hf_mini_blog.md` |
-| **Demo script (≤2 min)** | `submission/demo_video_script.md` |
-| **Reward curve image** | `outputs/evals/reward_curves.png` |
-| **Reward summary** | `outputs/evals/reward_summary.json` |
+| **Training Colab notebook** | [`colab/training.ipynb`](colab/training.ipynb) — end-to-end (TRL GRPO + Unsloth) on a free T4 |
+| **Colab launch link** | [Open in Colab](https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb) |
+| **Standalone training script** | [`train_colab.py`](train_colab.py) (Colab-first), [`train.py`](train.py) (local-first) |
+| **Mini-blog (publishable)** | [`submission/hf_mini_blog.md`](submission/hf_mini_blog.md) |
+| **Demo script (≤2 min)** | [`submission/demo_video_script.md`](submission/demo_video_script.md) |
+| **Cross-model reward curves** | `outputs/evals/reward_curves.png` (auto-generated by `scripts/plot_rewards.py`) |
+| **Training-evidence plot** | `outputs/evals/training_progress.png` (auto-generated by `train_colab.py`) |
+| **Reward summary JSON** | `outputs/evals/reward_summary.json` |
 
 **Snapshot of evaluation metrics (regenerate with `python scripts/plot_rewards.py --sessions sessions.pkl --out outputs/evals --summarize-models`):**
 
@@ -379,6 +395,14 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 
 *Left: reward curves grouped by `model_id` (mean ± std with moving average) to avoid mixed-model confusion.
 Right: final reward per episode colored by `model_id` for a clean head-to-head comparison.*
+
+### Training evidence (GRPO run)
+
+Both `train.py` and `train_colab.py` auto-generate `outputs/evals/training_progress.png` at the end of every run, showing per-step reward scatter + moving average and the MarketMaker curriculum level over time. This plot is embedded inline in the Colab notebook (`colab/training.ipynb`). Re-run or inspect the committed artifact:
+
+![GENESIS training progress](outputs/evals/training_progress.png)
+
+*Left: per-step reward (dots) + moving average (red line). Right: MarketMaker adaptive difficulty.*
 
 ---
 

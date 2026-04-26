@@ -6,7 +6,7 @@
 
 ## 1. PROJECT CONTEXT
 
-**GENESIS — The Autonomous Startup Gauntlet** is a multi-agent simulation where 5 AI co-founders (CEO, CTO, Sales, People, CFO) run a B2B SaaS startup through a 540-day gauntlet. The backend is a **FastMCP server** (Python/FastAPI on port 7860) with **28 MCP tools**, an **11-component reward engine**, an adaptive **MarketMaker** adversary, personal crises, pivots, and delayed-consequence events.
+**GENESIS — The Autonomous Startup Gauntlet** is a multi-agent simulation where 5 AI co-founders (CEO, CTO, Sales, People, CFO) run a B2B SaaS startup through a 540-day gauntlet. The backend is a **FastMCP server** (Python/FastAPI on port 7860) with **42 MCP tools**, an **11-component reward engine**, an adaptive **MarketMaker** adversary, personal crises, pivots, and delayed-consequence events.
 
 The UI is a **real-time mission control dashboard** for observing, controlling, and understanding what's happening inside the simulation. It's the hackathon demo artifact — it must look stunning, feel alive, and communicate the depth of the simulation at a glance.
 

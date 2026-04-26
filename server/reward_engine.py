@@ -167,4 +167,5 @@ def compute_reward(state: WorldState) -> RubricScore:
     if all(v < 0.1 for v in state.cofounder_morale.values()):
         score.total = score.total * 0.2   # team collapse
 
+    score.total = max(0.0, min(1.0, score.total))
     return score
