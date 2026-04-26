@@ -1,10 +1,16 @@
 {
-  "num_sessions_with_history": 70,
-  "avg_final_reward": 0.451,
+  "num_sessions_with_history": 110,
+  "avg_final_reward": 0.4547,
   "best_final_reward": 0.5022,
   "worst_final_reward": 0.2875,
-  "improvement_over_baseline": null,
+  "improvement_over_baseline": -0.0006,
   "by_model_id": {
+    "baseline_static": {
+      "num_sessions": 40,
+      "avg_final_reward": 0.461,
+      "best_final_reward": 0.4911,
+      "worst_final_reward": 0.4178
+    },
     "ollama_mistral_latest": {
       "num_sessions": 31,
       "avg_final_reward": 0.4707,
@@ -23,5 +29,8 @@
       "best_final_reward": 0.463,
       "worst_final_reward": 0.2875
     }
-  }
+  },
+  "baseline_model_id": "baseline_static",
+  "baseline_avg_final_reward": 0.461,
+  "compare_model_id": "ollama_deepseek_coder_6p7b"
 }
