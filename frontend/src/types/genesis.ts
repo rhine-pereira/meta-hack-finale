@@ -133,6 +133,16 @@ export interface GenomeExport {
   };
 }
 
+export type AgentRoleId = "ceo" | "cto" | "sales" | "people" | "cfo";
+export type RoleController = "ai" | "human";
+
+export interface HumanActionEntry {
+  day: number;
+  role: string;
+  action: string;
+  details: string | Record<string, unknown>;
+}
+
 export interface ComparisonExport {
   compared_models: string[];
   comparison: Record<string, FounderGenome>;
