@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -e ".[dev]" 2>/dev/null || \
     pip install --no-cache-dir \
         "openenv-core[core]>=0.2.3" \
         fastmcp fastapi "uvicorn[standard]" \
-        pydantic numpy requests matplotlib base58
+        pydantic numpy requests matplotlib pillow base58
 
 EXPOSE 7860
 

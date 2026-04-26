@@ -18,6 +18,9 @@ frontend/out/
 ## Generated exports
 exports/founder_genomes/
 
+## Egg info
+*.egg-info/
+
 ## OS / editor
 .DS_Store
 Thumbs.db
