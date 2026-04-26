@@ -1,3 +1,14 @@
+---
+title: GENESIS — The Autonomous Startup Gauntlet
+emoji: 🚀
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+pinned: true
+app_port: 7860
+short_description: Multi-agent startup simulation with 42 MCP tools and GRPO training
+---
+
 # GENESIS — The Autonomous Startup Gauntlet
 
 **Training LLMs to build, break, and rebuild companies from zero**
