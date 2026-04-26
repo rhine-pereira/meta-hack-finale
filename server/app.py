@@ -62,12 +62,74 @@ class SessionIdMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SessionIdMiddleware)
 
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse, HTMLResponse
 
 async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 app.router.add_route("/health", health, methods=["GET"])
+
+async def root(request: Request):
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>GENESIS — The Autonomous Startup Gauntlet</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f0f1a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{max-width:680px;width:100%;padding:48px 40px;background:#1a1a2e;border:1px solid #2d2d4e;border-radius:16px;box-shadow:0 0 60px rgba(99,102,241,.15)}
+    .badge{display:inline-block;background:#312e81;color:#a5b4fc;font-size:12px;font-weight:600;padding:4px 12px;border-radius:20px;margin-bottom:24px;letter-spacing:.5px}
+    h1{font-size:2rem;font-weight:700;line-height:1.2;margin-bottom:8px;background:linear-gradient(135deg,#a5b4fc,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .subtitle{color:#94a3b8;margin-bottom:32px;font-size:1rem;line-height:1.6}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:32px}
+    .stat{background:#0f0f1a;border:1px solid #2d2d4e;border-radius:10px;padding:16px}
+    .stat-val{font-size:1.5rem;font-weight:700;color:#818cf8}
+    .stat-label{font-size:12px;color:#64748b;margin-top:2px}
+    .endpoints{background:#0f0f1a;border:1px solid #2d2d4e;border-radius:10px;padding:20px;margin-bottom:24px}
+    .endpoints h3{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px}
+    .ep{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+    .method{font-size:11px;font-weight:700;background:#1e3a5f;color:#60a5fa;padding:3px 8px;border-radius:5px;min-width:42px;text-align:center}
+    .path{font-family:monospace;font-size:14px;color:#e2e8f0}
+    .desc{font-size:12px;color:#64748b;margin-left:auto}
+    .status{display:flex;align-items:center;gap:8px;font-size:14px;color:#4ade80}
+    .dot{width:8px;height:8px;background:#4ade80;border-radius:50%;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    a{color:#818cf8;text-decoration:none}a:hover{text-decoration:underline}
+    .footer{margin-top:24px;font-size:12px;color:#475569;text-align:center}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="badge">OpenEnv Hackathon 2026</div>
+  <h1>GENESIS<br/>The Autonomous Startup Gauntlet</h1>
+  <p class="subtitle">Train LLMs to co-found &amp; operate a B2B SaaS startup from Day 0 to Series A — 42 MCP tools, 5 agent roles, 11-component composable reward, adaptive MarketMaker curriculum.</p>
+  <div class="grid">
+    <div class="stat"><div class="stat-val">42</div><div class="stat-label">MCP Tools</div></div>
+    <div class="stat"><div class="stat-val">11</div><div class="stat-label">Reward Components</div></div>
+    <div class="stat"><div class="stat-val">5</div><div class="stat-label">Agent Roles</div></div>
+    <div class="stat"><div class="stat-val">GRPO</div><div class="stat-label">Training Method</div></div>
+  </div>
+  <div class="endpoints">
+    <h3>API Endpoints</h3>
+    <div class="ep"><span class="method">POST</span><span class="path">/mcp</span><span class="desc">MCP JSON-RPC — all 42 tools</span></div>
+    <div class="ep"><span class="method">GET</span><span class="path">/health</span><span class="desc">Health check</span></div>
+    <div class="ep"><span class="method">GET</span><span class="path">/demo/state</span><span class="desc">Live demo event state</span></div>
+    <div class="ep"><span class="method">GET</span><span class="path">/exports/...</span><span class="desc">Founder Genome artifacts</span></div>
+  </div>
+  <div class="status"><div class="dot"></div>Server running · OpenEnv-compliant MCP ready</div>
+  <div class="footer">
+    <a href="https://github.com/rhine-pereira/meta-hack-finale" target="_blank">GitHub</a> &nbsp;·&nbsp;
+    <a href="https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb" target="_blank">Training Colab</a> &nbsp;·&nbsp;
+    <a href="/health" target="_blank">/health</a>
+  </div>
+</div>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+app.router.add_route("/", root, methods=["GET"])
 
 # ── Demo Event Stream (Judge UI) ──────────────────────────────────────────────
 DEMO_EVENTS = deque(maxlen=500)
