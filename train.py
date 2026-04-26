@@ -78,14 +78,14 @@ parser.add_argument("--output", type=str, default="./genesis-checkpoints",
 parser.add_argument("--difficulty", type=int, default=1,
                     choices=[1, 2, 3, 4, 5],
                     help="GENESIS difficulty (1=Tutorial/90d, 2=Seed/180d)")
-parser.add_argument("--episode-days", type=int, default=30,
-                    help="Days per training episode (shorter = faster reward)")
+parser.add_argument("--episode-days", type=int, default=60,
+                    help="Days per training episode (default 60; use 90 for full Series A signal).")
 parser.add_argument("--num-generations", type=int, default=2, help="GRPO completions per prompt")
 parser.add_argument(
     "--max-completion-length",
     type=int,
-    default=128,
-    help="Token budget per completion. Lower is faster.",
+    default=192,
+    help="Token budget per completion (default 192; write_company_brain needs ~80-100 tokens for good values).",
 )
 parser.add_argument(
     "--dataset-multiplier",
@@ -171,9 +171,12 @@ class SelfPlayState:
     detected_weaknesses: list[str] = dc_field(default_factory=list)
     current_difficulty: int = DIFFICULTY
     episodes_at_current_level: int = 0
-    PROMOTE_THRESHOLD: float = 0.65   # avg reward to level up
+    # Lowered promote threshold (0.55 vs 0.65): the new brain-writing behaviour
+    # means models reach ~0.55 sooner; 0.65 was too high and the curriculum
+    # never advanced, giving the model a stale, easy environment throughout training.
+    PROMOTE_THRESHOLD: float = 0.55   # avg reward to level up
     DEMOTE_THRESHOLD: float = 0.30    # avg reward to level down
-    WINDOW: int = 10                  # rolling window for avg
+    WINDOW: int = 8                   # rolling window (reduced from 10 for faster response)
 
     def record(self, reward: float, weaknesses: list[str]) -> None:
         self.episode_rewards.append(reward)
@@ -368,37 +371,99 @@ Respond with a JSON tool call to take action. Format:
 {"tool": "<tool_name>", "args": {<arguments>}}
 
 Available tools depend on your role. Always reason about long-term consequences.
-Your goal: survive 18 months, reach Series A, keep the team motivated."""
+Your goal: survive 18 months, reach Series A, keep the team motivated.
+
+CRITICAL REWARD SIGNALS — your score improves when you:
+1. Regularly call write_company_brain to store strategic plans, market insights, and decisions.
+   Each substantive brain entry (>50 chars) directly increases your decision_coherence score.
+   Example: {"tool": "write_company_brain", "args": {"key": "strategy_q1", "value": "Focus on enterprise sales..."}}
+2. Build features (CTO) to improve product velocity.
+3. Maintain runway > 90 days (CFO).
+4. Keep customer satisfaction high (everyone).
+5. Resolve personal crises quickly (People head).
+"""
 
 ROLE_SYSTEM_PROMPTS = {
-    "ceo": "You are the CEO. Focus on strategy, fundraising, and external relationships. "
-           "You can negotiate with investors, pivot the company, and set strategic direction.",
-    "cto": "You are the CTO. Focus on product, engineering velocity, and technical quality. "
-           "You assign engineers to features and manage tech debt.",
-    "sales": "You are Head of Sales. Focus on revenue, customer relationships, and market intel. "
-             "Analyze the market and write strategic memos.",
-    "people": "You are Head of People. Focus on hiring quality, team morale, and conflict resolution. "
-              "Handle personal crises and prevent burnout.",
-    "cfo": "You are the CFO. Focus on runway, burn rate, and financial modeling. "
-           "Monitor cash and prepare for fundraising.",
+    "ceo": (
+        "You are the CEO. Focus on strategy, fundraising, and external relationships. "
+        "You can negotiate with investors, pivot the company, and set strategic direction. "
+        "Key tools: make_decision, write_company_brain, negotiate_with_investor, pivot_company. "
+        "Alternate between make_decision and write_company_brain each day to build strategic memory."
+    ),
+    "cto": (
+        "You are the CTO. Focus on product, engineering velocity, and technical quality. "
+        "You assign engineers to features and manage tech debt. "
+        "Key tools: build_feature, write_company_brain, check_team_morale. "
+        "Regularly build features and document your technical roadmap in company_brain."
+    ),
+    "sales": (
+        "You are Head of Sales. Focus on revenue, customer relationships, and market intel. "
+        "Analyze the market and write strategic memos to company_brain. "
+        "Key tools: analyze_market, write_company_brain, make_decision. "
+        "Store ICP definitions, pricing strategy, and customer feedback in company_brain."
+    ),
+    "people": (
+        "You are Head of People. Focus on hiring quality, team morale, and conflict resolution. "
+        "Handle personal crises and prevent burnout. "
+        "Key tools: check_team_morale, hire_candidate, handle_personal_crisis, write_company_brain. "
+        "Document your people strategy and hiring plan in company_brain."
+    ),
+    "cfo": (
+        "You are the CFO. Focus on runway, burn rate, and financial modeling. "
+        "Monitor cash and prepare for fundraising. "
+        "Key tools: check_bank_balance, negotiate_with_investor, write_company_brain. "
+        "Always document the financial model and fundraising timeline in company_brain."
+    ),
+}
+
+# Brain keys each role should populate — used in scenario prompts to give the model a target
+ROLE_BRAIN_KEY_HINTS = {
+    "ceo":    "strategy_overview, series_a_plan, competitive_response",
+    "cto":    "tech_roadmap, debt_reduction_plan, feature_priorities",
+    "sales":  "gtm_strategy, icp_definition, customer_feedback",
+    "people": "people_ops, hiring_plan, morale_initiatives",
+    "cfo":    "financial_model, burn_rate_analysis, fundraising_timeline",
 }
 
 DAY_SCENARIOS = [
-    # Early stage (Day 1-30)
+    # Early stage: explicit brain-writing nudge
     "Day {day}. Cash: ${cash:,.0f}. Burn: ${burn}/day. Runway: {runway} days. "
     "Employees: {employees}. Customers: {customers}. MRR: ${mrr:,.0f}. "
-    "What is your most important action today?",
+    "Company brain has {brain_entries} entries so far. "
+    "Suggested brain keys to update: {brain_keys}. "
+    "What is your most important action today? "
+    "(Tip: writing substantive notes to company_brain boosts your decision_coherence score.)",
 
     # Crisis scenario
     "Day {day}. ALERT: {crisis}. "
     "Cash: ${cash:,.0f}. Team morale: {morale:.0%}. "
-    "How do you respond?",
+    "How do you respond? If relevant, record your crisis response strategy in company_brain.",
 
     # Fundraising scenario
     "Day {day}. Series A preparation needed. ARR: ${arr:,.0f}. "
     "Investor {investor} has {sentiment:.0%} sentiment. Runway: {runway} days. "
-    "What is your fundraising action?",
+    "Brain entries: {brain_entries}. "
+    "What is your fundraising action? Consider writing your Series A narrative to company_brain.",
+
+    # Growth milestone
+    "Day {day}. MRR just crossed ${mrr:,.0f}. Burn: ${burn}/day. "
+    "Tech debt: {tech_debt:.0%}. Runway: {runway} days. "
+    "You have {brain_entries} company_brain entries. "
+    "What should {role} prioritise to accelerate growth while managing risk?",
 ]
+
+CRISIS_TEMPLATES = [
+    "Your CTO is considering leaving for a Google offer (3x salary)",
+    "Three engineers are interviewing elsewhere after a product pivot",
+    "A board member is suggesting inflating MAU numbers in the Series A deck",
+    "Your lead investor moved a critical call to conflict with a family commitment",
+    "Head of Engineering quit with 2 weeks notice; no documentation exists",
+    "AWS bill came in 4x expected due to a logging bug in production",
+    "A major customer (30% of ARR) is threatening to churn over a missing feature",
+]
+
+INVESTOR_NAMES = ["Sequoia Capital", "a16z", "Benchmark", "Y Combinator", "First Round"]
+
 
 def build_dataset(n_samples: int = 200) -> list[dict]:
     """
@@ -420,6 +485,9 @@ def build_dataset(n_samples: int = 200) -> list[dict]:
         customers = rng.randint(0, 20)
         mrr = rng.uniform(0, 50_000)
         morale = rng.uniform(0.3, 0.9)
+        # How many brain entries exist already — gives model context on coverage gap
+        brain_entries = rng.randint(0, 8)
+        tech_debt = rng.uniform(0.1, 0.7)
 
         scenario = DAY_SCENARIOS[i % len(DAY_SCENARIOS)].format(
             day=day,
@@ -431,9 +499,13 @@ def build_dataset(n_samples: int = 200) -> list[dict]:
             mrr=mrr,
             arr=mrr * 12,
             morale=morale,
-            crisis="Your CTO is considering leaving for a Google offer",
-            investor="Sequoia Capital",
+            crisis=rng.choice(CRISIS_TEMPLATES),
+            investor=rng.choice(INVESTOR_NAMES),
             sentiment=rng.uniform(0.3, 0.9),
+            brain_entries=brain_entries,
+            brain_keys=ROLE_BRAIN_KEY_HINTS.get(role, "strategy_overview"),
+            tech_debt=tech_debt,
+            role=role,
         )
 
         messages = [

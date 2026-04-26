@@ -118,13 +118,24 @@ def compute_reward(state: WorldState) -> RubricScore:
         score.personal_crisis_handling = max(0.0, avg_quality - ignore_penalty)
 
     # 9. Decision Coherence (proxy: CompanyBrain has substantive entries)
-    # A well-maintained CompanyBrain signals structured long-horizon planning
+    # A well-maintained CompanyBrain signals structured long-horizon planning.
+    # Gradient: each substantive key (>50 chars) contributes 0.1, capped at 1.0.
+    # Also award partial credit for keys with 20-50 chars (0.05 each) so that
+    # early-stage brain writes still improve the score rather than scoring 0.
     brain_quality_keys = [k for k in state.company_brain if len(state.company_brain[k]) > 50]
-    score.decision_coherence = min(1.0, len(brain_quality_keys) / 10)
+    partial_brain_keys = [k for k in state.company_brain
+                          if 20 < len(state.company_brain[k]) <= 50]
+    score.decision_coherence = min(
+        1.0,
+        len(brain_quality_keys) * 0.10 + len(partial_brain_keys) * 0.05,
+    )
 
     # 10. Company Brain Quality (richness of stored strategic context)
+    # Lowered saturation target from 2000 → 800 chars so that a few substantive
+    # entries already push the score above 0.5, giving the model a reward signal
+    # early in training rather than near-zero for the whole episode.
     total_brain_chars = sum(len(v) for v in state.company_brain.values())
-    score.company_brain_quality = min(1.0, total_brain_chars / 2000)
+    score.company_brain_quality = min(1.0, total_brain_chars / 800)
 
     # 11. Pivot Execution (only scored if a pivot happened)
     if state.pivot_count == 0:
