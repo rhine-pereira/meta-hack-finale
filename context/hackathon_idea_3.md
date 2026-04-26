@@ -1,3 +1,14 @@
+Stop running more steps if you already have:
+
+1 “hero” Resurrection Report (USP 1) you can screenshot + export JSON
+2+ exported Founder Genomes (USP 3) + 1 comparison image
+Hugging Face Space URL working: /health and /mcp respond
+Do 1 more short rollout batch only if:
+
+You have <10 episodes for the model you’ll showcase, or
+Your genome export is empty / too noisy to defend
+
+
 # 🧬 GENESIS — The Autonomous Startup Gauntlet
 
 ### *Training LLMs to Build, Break, and Rebuild Companies From Zero*
