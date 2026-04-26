@@ -21,8 +21,8 @@ exports/founder_genomes/
 ## Egg info
 *.egg-info/
 
-## LoRA adapter (large model files — upload via HF Hub separately if needed)
-models/
+## LoRA adapter — only exclude the tokenizer (too large, not needed for server)
+models/genesis_final/tokenizer.json
 
 ## OS / editor
 .DS_Store
