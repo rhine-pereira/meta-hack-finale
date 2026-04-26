@@ -327,6 +327,7 @@ with GenesisEnv(base_url="http://127.0.0.1:7860") as env:
 **Health check:** `GET /health` → `{"status":"ok"}`.
 
 **Docker / Space:** `Dockerfile` in repo root for **Hugging Face Spaces** deployment.
+Step-by-step publish guide: `docs/huggingface_spaces.md`.
 
 ---
 

@@ -2,7 +2,13 @@ import os
 import json
 from typing import Optional, List, Dict, Any
 from hashlib import sha256
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    # Dotenv is optional; continue with process env values if unavailable.
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 # Solana proof support is optional: most users only need the environment + training.
 # On Colab/Windows, Solana python packages can conflict with the httpx/websockets
