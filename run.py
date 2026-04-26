@@ -469,8 +469,61 @@ def _scene(title: str) -> None:
     time.sleep(1.5)
 
 
+def _load_ml_model(adapter: str, base_model: str):
+    """
+    Try to load the fine-tuned LoRA adapter for use in the demo.
+    Returns (model, tokenizer) on success, or (None, None) on failure
+    (e.g. missing deps or adapter path).  Never raises.
+    """
+    try:
+        from ml_inference import load_model_and_tokenizer
+        model, tokenizer = load_model_and_tokenizer(base_model, adapter)
+        return model, tokenizer
+    except FileNotFoundError as e:
+        warn(f"ML adapter not found — demo will use fallback decisions. ({e})")
+    except ImportError as e:
+        warn(f"ML deps not installed (transformers/peft) — using fallback. ({e})")
+    except Exception as e:
+        warn(f"ML model failed to load — using fallback. ({e})")
+    return None, None
+
+
+def _ml_decide(
+    ml_model, ml_tokenizer, role: str, briefing: dict, *, max_new_tokens: int = 200
+) -> tuple[str, str]:
+    """
+    Ask the ML model for a decision given a role + briefing dict.
+    Returns (decision_text, reasoning_text).
+    Falls back gracefully if inference fails.
+    """
+    if ml_model is None or ml_tokenizer is None:
+        return (
+            f"{role.upper()}: maintain plan; address top inbox items.",
+            "Fallback — ML model not loaded.",
+        )
+    try:
+        from ml_inference import build_prompt, generate_tool_call
+        prompt = build_prompt(role, briefing, ml_tokenizer)
+        completion, tool_call = generate_tool_call(
+            ml_model, ml_tokenizer, prompt, max_new_tokens=max_new_tokens
+        )
+        tool = tool_call.get("tool", "make_decision")
+        args = tool_call.get("args") or {}
+        decision = args.get("decision") or f"[{tool}] {json.dumps(args, default=str)[:200]}"
+        reasoning = args.get("reasoning") or completion[:300]
+        return str(decision)[:800], str(reasoning)[:1200]
+    except Exception as e:
+        return (
+            f"{role.upper()}: maintain plan (ML error: {e}).",
+            "Fallback due to inference error.",
+        )
+
+
 def run_demo(backend_port: int, *, episodes: int, difficulty: int,
-             episode_days: int, model_id: str) -> None:
+             episode_days: int, model_id: str,
+             use_ml: bool = True,
+             ml_adapter: str = None,
+             ml_base_model: str = "Qwen/Qwen2.5-3B-Instruct") -> None:
     """
     Comprehensive Phase-4 demo.
 
@@ -484,8 +537,8 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
       6. Memory & messaging  (CompanyBrain + cross-role messaging)
       7. Crisis handling     (personal crises)
       8. Strategy & pivots   (pivot ballot, voting, override)
-      9. Time advancement    (get_daily_briefing across roles)
-     10. USP-1 Resurrection  (postmortem scenario load + report)
+      9. Time advancement    (ML model drives every day-tick)
+     10. USP-1 Resurrection  (ML model responds to historical fork crises)
      11. USP-2 Ghost Founder (human takeover / release)
      12. USP-3 Founder Genome (export + compare across models)
      13. Blockchain proofs   (Merkle status + dry-run on-chain commit)
@@ -493,6 +546,19 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
     """
     global _DEMO_BACKEND_PORT
     _DEMO_BACKEND_PORT = backend_port
+
+    # ── ML model bootstrap ────────────────────────────────────────────────────
+    if ml_adapter is None:
+        ml_adapter = str(ROOT / "models" / "genesis_final")
+
+    ml_model, ml_tokenizer = None, None
+    if use_ml:
+        step("Loading ML model (genesis_final LoRA adapter) ...")
+        ml_model, ml_tokenizer = _load_ml_model(ml_adapter, ml_base_model)
+        if ml_model is not None:
+            ok("ML model loaded — demo decisions will be driven by the fine-tuned model.")
+        else:
+            warn("ML model unavailable — demo will continue with fallback static decisions.")
 
     banner("Phase 4 — Full feature demo")
     _push_demo_event(4, "Full Feature Demo", "demo_start", "Starting scripted rollout tour", "info")
@@ -815,23 +881,42 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                 info(_short(res))
                 _push_demo_event(4, "Strategy & Pivots", f"pivot_company (vote {voter})", "Vote recorded", "ok", res)
 
-        # ── 9. Time advancement ─────────────────────────────────────────────
-        _scene(f"9/14  Time advancement — {episode_days} day(s) of briefings")
-        _push_demo_event(4, "Time Advancement", "9/14 Time Advancement", f"Advancing {episode_days} days", "info")
+        # ── 9. Time advancement (ML-driven) ─────────────────────────────────
+        _scene(f"9/14  Time advancement — {episode_days} day(s) [{('ML model' if ml_model else 'fallback')}]")
+        _push_demo_event(4, "Time Advancement", "9/14 Time Advancement",
+                         f"Advancing {episode_days} days — driven by {'ML model' if ml_model else 'fallback'}",
+                         "info")
         for day in range(1, episode_days + 1):
             role = roles[day % len(roles)]
             briefing = _safe_call(env, "get_daily_briefing", episode_id=primary_id, agent_role=role)
+            if not isinstance(briefing, dict):
+                continue
+
+            # Ask the ML model what to do, then post it as a make_decision call
+            decision, reasoning = _ml_decide(
+                ml_model, ml_tokenizer, role, briefing
+            )
+            decision_type = "strategic" if day % 5 == 0 else "tactical"
             _safe_call(env, "make_decision", episode_id=primary_id, agent_role=role,
-                       decision_type="strategic" if day % 5 == 0 else "tactical",
-                       decision=f"Day {day} {role}: maintain plan; address top inbox items.",
-                       reasoning="Demo loop — exercising daily decision logging.")
-            if isinstance(briefing, dict) and briefing.get("is_done"):
+                       decision_type=decision_type,
+                       decision=decision,
+                       reasoning=reasoning)
+
+            src = "ML" if ml_model else "fallback"
+            info(f"  day {briefing.get('day', day):>3} [{role}] [{src}] {decision[:80]}")
+            _push_demo_event(4, "Time Advancement", f"day_{day}",
+                             f"[{role}] {decision[:100]}", "ok",
+                             {"role": role, "decision": decision, "source": src})
+
+            if briefing.get("is_done"):
                 info(f"episode finished early on day {day}")
-                _push_demo_event(4, "Time Advancement", "get_daily_briefing", f"Finished early on day {day}", "ok", briefing)
+                _push_demo_event(4, "Time Advancement", "get_daily_briefing",
+                                 f"Finished early on day {day}", "ok", briefing)
                 break
             if day == episode_days:
                 ok(f"Advanced through {episode_days} day-ticks.")
-                _push_demo_event(4, "Time Advancement", "get_daily_briefing", f"Advanced {episode_days} days", "ok", briefing)
+                _push_demo_event(4, "Time Advancement", "get_daily_briefing",
+                                 f"Advanced {episode_days} days", "ok", briefing)
 
         # ── 10. USP-1 Resurrection Engine ──────────────────────────────────
         _scene("10/14  USP-1 Dead Startup Resurrection Engine")
@@ -869,14 +954,27 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                     if "[HISTORICAL FORK]" in c.get("description", ""):
                         target = c.get("target_role") or role
                         step(f"day {day} fork triggered → {target}")
-                        _push_demo_event(4, "Resurrection Engine", "fork_triggered", f"Day {day}: {c.get('description')[:50]}", "warn", c)
+                        _push_demo_event(4, "Resurrection Engine", "fork_triggered",
+                                         f"Day {day}: {c.get('description')[:50]}", "warn", c)
+
+                        # Ask the ML model how it would respond to this historical fork
+                        fork_briefing = dict(b)
+                        fork_briefing["active_crises"] = [c]
+                        ml_response, ml_reasoning = _ml_decide(
+                            ml_model, ml_tokenizer, target, fork_briefing, max_new_tokens=300
+                        )
+                        src = "ML" if ml_model else "fallback"
+                        info(f"  [{src}] fork response: {ml_response[:120]}")
+
                         _safe_call(env, "handle_personal_crisis", episode_id=res_id,
                                    agent_role=target, crisis_id=c["id"],
-                                   response=("I'd take the contrarian path: defer the marketing splurge, "
-                                             "keep team lean, ship a B2B beta and validate willingness-to-pay first."))
-                        _safe_call(env, "record_fork_decision", episode_id=res_id, agent_role=target,
-                                   crisis_id=c["id"],
-                                   decision_summary="Defer expensive launch; ship narrow B2B pilot and instrument WTP.")
+                                   response=ml_response)
+                        _safe_call(env, "record_fork_decision", episode_id=res_id,
+                                   agent_role=target, crisis_id=c["id"],
+                                   decision_summary=ml_response[:500])
+                        _push_demo_event(4, "Resurrection Engine", "fork_response",
+                                         f"[{src}] {ml_response[:100]}", "ok",
+                                         {"source": src, "response": ml_response})
                         break
                 if b.get("is_done"):
                     break
@@ -934,11 +1032,21 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                    model_id=secondary_model, model_provider="demo", model_version="run.py")
         for day in range(1, 11):
             role = roles[day % len(roles)]
-            _safe_call(env, "get_daily_briefing", episode_id=secondary_id, agent_role=role)
+            rival_briefing = _safe_call(env, "get_daily_briefing",
+                                        episode_id=secondary_id, agent_role=role)
+            if not isinstance(rival_briefing, dict):
+                continue
+            # Use the ML model for the rival too — different seed gives different outputs,
+            # creating a genuine comparison of two ML-driven playthroughs
+            rival_decision, rival_reasoning = _ml_decide(
+                ml_model, ml_tokenizer, role, rival_briefing
+            )
             _safe_call(env, "make_decision", episode_id=secondary_id, agent_role=role,
                        decision_type="tactical",
-                       decision=f"Rival {role} day {day}: aggressive growth plays.",
-                       reasoning="Rival profile — high risk / high velocity.")
+                       decision=rival_decision,
+                       reasoning=rival_reasoning)
+            if rival_briefing.get("is_done"):
+                break
         _safe_call(env, "export_founder_genome", model_id=secondary_model)
         _push_demo_event(4, "Founder Genome", "export_founder_genome", f"Exported {secondary_model}", "ok")
 
@@ -1117,6 +1225,13 @@ def main() -> int:
     parser.add_argument("--difficulty", type=int, default=2)
     parser.add_argument("--episode-days", type=int, default=20)
     parser.add_argument("--model-id", type=str, default="demo-model")
+    # ML model flags
+    parser.add_argument("--no-ml", action="store_true",
+                        help="Disable ML model — demo uses static fallback decisions.")
+    parser.add_argument("--ml-adapter", type=str, default=None,
+                        help="Path to PEFT LoRA adapter (default: models/genesis_final).")
+    parser.add_argument("--ml-base-model", type=str, default="Qwen/Qwen2.5-3B-Instruct",
+                        help="HuggingFace base model ID for the LoRA adapter.")
     args = parser.parse_args()
 
     mode = args.mode or interactive_menu()
@@ -1162,6 +1277,9 @@ def main() -> int:
                 difficulty=args.difficulty,
                 episode_days=args.episode_days,
                 model_id=args.model_id,
+                use_ml=not args.no_ml,
+                ml_adapter=args.ml_adapter,
+                ml_base_model=args.ml_base_model,
             )
 
         if mode == "smoke":
