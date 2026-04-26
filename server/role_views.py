@@ -320,7 +320,8 @@ class CEOViewFilter(RoleViewFilter):
             ),
             messages=role_messages,
             active_personal_crises=[
-                {"id": c.id, "severity": c.severity, "description": c.description} for c in crises
+                {"id": c.id, "severity": c.severity, "description": c.description,
+                 "target_role": c.target_role.value if hasattr(c.target_role, 'value') else str(c.target_role)} for c in crises
             ],
             company_brain=filtered_brain,
         )
@@ -405,7 +406,8 @@ class CTOViewFilter(RoleViewFilter):
             ),
             messages=role_messages,
             active_personal_crises=[
-                {"id": c.id, "severity": c.severity, "description": c.description} for c in crises
+                {"id": c.id, "severity": c.severity, "description": c.description,
+                 "target_role": c.target_role.value if hasattr(c.target_role, 'value') else str(c.target_role)} for c in crises
             ],
             company_brain={k: v for k, v in state.company_brain.items()
                          if any(domain in k.lower() for domain in ["tech", "product", "architecture", "feature"])},
@@ -486,7 +488,8 @@ class SalesViewFilter(RoleViewFilter):
             ),
             messages=role_messages,
             active_personal_crises=[
-                {"id": c.id, "severity": c.severity, "description": c.description} for c in crises
+                {"id": c.id, "severity": c.severity, "description": c.description,
+                 "target_role": c.target_role.value if hasattr(c.target_role, 'value') else str(c.target_role)} for c in crises
             ],
             company_brain={k: v for k, v in state.company_brain.items()
                          if any(domain in k.lower() for domain in ["go_to_market", "sales", "customer", "pricing", "positioning"])},
@@ -628,7 +631,8 @@ class CFOViewFilter(RoleViewFilter):
             ),
             messages=role_messages,
             active_personal_crises=[
-                {"id": c.id, "severity": c.severity, "description": c.description} for c in crises
+                {"id": c.id, "severity": c.severity, "description": c.description,
+                 "target_role": c.target_role.value if hasattr(c.target_role, 'value') else str(c.target_role)} for c in crises
             ],
             company_brain={k: v for k, v in state.company_brain.items()
                          if any(domain in k.lower() for domain in ["financial", "fundraising", "burn", "runway", "equity"])},

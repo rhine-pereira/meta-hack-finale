@@ -50,6 +50,22 @@ app.add_middleware(
     expose_headers=["mcp-session-id"],
 )
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    # Log incoming request
+    session_id = request.headers.get("mcp-session-id")
+    # print(f"Incoming request: {request.method} {request.url.path}, session-id: {session_id}")
+    
+    response = await call_next(request)
+    
+    # Ensure session id is exposed
+    if "mcp-session-id" in response.headers:
+        pass # Already there
+    elif session_id:
+        response.headers["mcp-session-id"] = session_id
+        
+    return response
+
 from starlette.responses import JSONResponse, StreamingResponse
 
 async def health(request: Request):
