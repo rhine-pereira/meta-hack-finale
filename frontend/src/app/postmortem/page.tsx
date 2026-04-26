@@ -478,11 +478,16 @@ export default function PostmortemPage() {
   }, []);
 
   const handleLoadScenario = useCallback(async (scenarioId: string) => {
-    if (!episodeId) {
-      // Spin up a session first
+    let eid = episodeId;
+    if (!eid) {
+      // Spin up a session first. Then read the newly created episodeId from the store.
       await reset(difficulty, seed);
+      eid = useGenesisStore.getState().episodeId;
     }
-    const eid = episodeId ?? `ep-${Math.random().toString(36).substring(2, 9)}`;
+    if (!eid) {
+      setError("Failed to start a new session. Is the GENESIS server running?");
+      return;
+    }
     setLoadingId(scenarioId);
     setError(null);
     try {

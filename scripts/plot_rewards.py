@@ -96,6 +96,7 @@ def plot_from_sessions(sessions_file: str, output_dir: str) -> dict:
     all_rewards: list[list[float]] = []
     all_breakdowns: list[list[dict]] = []
     episode_labels: list[str] = []
+    episode_model_ids: list[str] = []
 
     for ep_id, state in sessions.items():
         if not hasattr(state, "reward_history") or not state.reward_history:
@@ -103,6 +104,7 @@ def plot_from_sessions(sessions_file: str, output_dir: str) -> dict:
         rewards = [float(x) for x in state.reward_history]
         all_rewards.append(rewards)
         episode_labels.append(f"Ep {ep_id[:6]}")
+        episode_model_ids.append(str(getattr(state, "model_id", None) or "unknown"))
         if hasattr(state, "reward_breakdown_history") and state.reward_breakdown_history:
             all_breakdowns.append(state.reward_breakdown_history)
 
@@ -115,6 +117,7 @@ def plot_from_sessions(sessions_file: str, output_dir: str) -> dict:
     fig = _make_figure(
         all_rewards=all_rewards,
         episode_labels=episode_labels,
+        episode_model_ids=episode_model_ids,
         all_breakdowns=all_breakdowns if all_breakdowns else None,
         title="GENESIS — Training Progress",
         subtitle="Real session data",
@@ -133,6 +136,36 @@ def plot_from_sessions(sessions_file: str, output_dir: str) -> dict:
     }
     _write_summary(summary, output_dir)
     return summary
+
+
+def summarize_by_model_id(sessions_file: str) -> dict[str, dict]:
+    """
+    Return per-model summaries from sessions.pkl.
+    Expects WorldState objects with fields: model_id, reward_history.
+    """
+    if not os.path.exists(sessions_file):
+        raise FileNotFoundError(f"No sessions file at {sessions_file!r}")
+
+    with open(sessions_file, "rb") as f:
+        sessions, _ = pickle.load(f)
+
+    buckets: dict[str, list[float]] = {}
+    for _, state in sessions.items():
+        rewards = getattr(state, "reward_history", None)
+        if not rewards:
+            continue
+        mid = getattr(state, "model_id", None) or "unknown"
+        buckets.setdefault(str(mid), []).append(float(rewards[-1]))
+
+    out: dict[str, dict] = {}
+    for mid, finals in sorted(buckets.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        out[mid] = {
+            "num_sessions": len(finals),
+            "avg_final_reward": round(float(np.mean(finals)), 4),
+            "best_final_reward": round(float(np.max(finals)), 4),
+            "worst_final_reward": round(float(np.min(finals)), 4),
+        }
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +477,7 @@ def generate_demo_artifacts(output_dir: str, seed: int = 42) -> dict:
 def _make_figure(
     all_rewards: list[list[float]],
     episode_labels: list[str],
+    episode_model_ids: Optional[list[str]],
     all_breakdowns: Optional[list[list[dict]]],
     title: str,
     subtitle: str,
@@ -467,30 +501,120 @@ def _make_figure(
             spine.set_color(ax_spine_color)
         ax.grid(True, color="#1e293b", linestyle="--", linewidth=0.7, alpha=0.8)
 
-    palette = plt.cm.viridis(np.linspace(0.2, 0.9, len(all_rewards)))
+    # If model IDs are present, group plots by model_id to avoid a huge legend.
+    group_by_model = (
+        isinstance(episode_model_ids, list)
+        and len(episode_model_ids) == len(all_rewards)
+        and len(set(episode_model_ids)) >= 2
+    )
 
     # Left: per-episode raw + moving average
     ax = axes[0]
     _style(ax)
-    for i, (rewards, label) in enumerate(zip(all_rewards, episode_labels)):
-        days = list(range(1, len(rewards) + 1))
-        ax.plot(days, rewards, color=palette[i], alpha=0.25, linewidth=0.9)
-        ma = _moving_average(rewards, 10)
-        ax.plot(_ma_x(len(rewards), len(ma)), ma,
-                color=palette[i], linewidth=2.0, label=label)
-    ax.set_title("Reward per Episode (moving avg)", fontweight="bold")
+    if not group_by_model:
+        palette = plt.cm.viridis(np.linspace(0.2, 0.9, len(all_rewards)))
+        for i, (rewards, label) in enumerate(zip(all_rewards, episode_labels)):
+            days = list(range(1, len(rewards) + 1))
+            ax.plot(days, rewards, color=palette[i], alpha=0.25, linewidth=0.9)
+            ma = _moving_average(rewards, 10)
+            ax.plot(_ma_x(len(rewards), len(ma)), ma, color=palette[i], linewidth=2.0, label=label)
+        ax.legend(
+            fontsize=8,
+            facecolor="#1e293b",
+            edgecolor=ax_spine_color,
+            labelcolor=ax_label_color,
+            framealpha=0.9,
+        )
+        ax.set_title("Reward per Episode (moving avg)", fontweight="bold")
+    else:
+        # Group by model_id and plot mean + band, plus a few sample episodes faintly.
+        from collections import defaultdict
+
+        by_model: dict[str, list[list[float]]] = defaultdict(list)
+        for mid, rewards in zip(episode_model_ids or [], all_rewards):
+            by_model[mid].append(rewards)
+
+        # Keep plot readable: highlight up to top 6 models by count.
+        ranked = sorted(by_model.items(), key=lambda kv: (-len(kv[1]), kv[0]))
+        top = ranked[:6]
+        rest = ranked[6:]
+
+        colors = plt.cm.tab10(np.linspace(0, 1, max(3, len(top))))
+
+        def _plot_model(mid: str, episodes: list[list[float]], color):
+            # Plot up to 3 sample episodes as faint lines (to show variance)
+            for ep in episodes[:3]:
+                days = list(range(1, len(ep) + 1))
+                ax.plot(days, ep, color=color, alpha=0.12, linewidth=0.9)
+            # Mean curve across aligned days (truncate to min length)
+            min_len = min(len(ep) for ep in episodes)
+            arr = np.array([ep[:min_len] for ep in episodes], dtype=float)
+            mean = np.mean(arr, axis=0)
+            std = np.std(arr, axis=0)
+            days = list(range(1, min_len + 1))
+            ax.fill_between(days, mean - std, mean + std, color=color, alpha=0.10)
+            ma = _moving_average(list(mean), 10)
+            ax.plot(_ma_x(len(mean), len(ma)), ma, color=color, linewidth=2.4, label=f"{mid} (n={len(episodes)})")
+
+        for i, (mid, episodes) in enumerate(top):
+            _plot_model(mid, episodes, colors[i % len(colors)])
+
+        # Plot the rest as a single grey aggregate (optional)
+        if rest:
+            merged: list[list[float]] = []
+            for _, eps in rest:
+                merged.extend(eps)
+            _plot_model("other", merged, GENESIS_GREY)
+
+        ax.legend(
+            fontsize=8,
+            facecolor="#1e293b",
+            edgecolor=ax_spine_color,
+            labelcolor=ax_label_color,
+            framealpha=0.9,
+        )
+        ax.set_title("Reward by Model (mean ± std, moving avg)", fontweight="bold")
     ax.set_xlabel("Simulated Day")
     ax.set_ylabel("Reward (0–1)")
     ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=8, facecolor="#1e293b", edgecolor=ax_spine_color,
-              labelcolor=ax_label_color, framealpha=0.9)
 
     # Right: final reward progression
     ax2 = axes[1]
     _style(ax2)
     finals = [r[-1] for r in all_rewards]
     ep_nums = list(range(1, len(finals) + 1))
-    ax2.scatter(ep_nums, finals, color=GENESIS_PURPLE, s=60, zorder=5)
+    if not group_by_model:
+        ax2.scatter(ep_nums, finals, color=GENESIS_PURPLE, s=60, zorder=5)
+    else:
+        # Color points by model_id (top 6 + other)
+        from collections import Counter
+
+        counts = Counter(episode_model_ids or [])
+        top_models = [m for m, _ in counts.most_common(6)]
+        palette = {m: plt.cm.tab10(i / max(1, len(top_models) - 1)) for i, m in enumerate(top_models)}
+        colors_pt = []
+        for mid in episode_model_ids or []:
+            colors_pt.append(palette.get(mid, GENESIS_GREY))
+        ax2.scatter(ep_nums, finals, c=colors_pt, s=55, zorder=5)
+        # Legend handles
+        handles = []
+        labels = []
+        for m in top_models:
+            handles.append(plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=palette[m], markersize=7))
+            labels.append(f"{m} (n={counts[m]})")
+        if len(counts) > len(top_models):
+            handles.append(plt.Line2D([0], [0], marker="o", color="w", markerfacecolor=GENESIS_GREY, markersize=7))
+            labels.append("other")
+        ax2.legend(
+            handles,
+            labels,
+            fontsize=8,
+            facecolor="#1e293b",
+            edgecolor=ax_spine_color,
+            labelcolor=ax_label_color,
+            framealpha=0.9,
+            loc="lower right",
+        )
     if len(finals) >= 3:
         ma_f = _moving_average(finals, min(3, len(finals)))
         ax2.plot(_ma_x(len(finals), len(ma_f)), ma_f,
@@ -593,6 +717,23 @@ def main():
         "--seed", type=int, default=42,
         help="RNG seed for --demo mode (default: 42)",
     )
+    parser.add_argument(
+        "--summarize-models",
+        action="store_true",
+        help="Include per-model_id summary in reward_summary.json",
+    )
+    parser.add_argument(
+        "--baseline-model-id",
+        type=str,
+        default=None,
+        help="If set, compute improvement vs this baseline model_id (uses avg_final_reward deltas).",
+    )
+    parser.add_argument(
+        "--compare-model-id",
+        type=str,
+        default=None,
+        help="If set with --baseline-model-id, compute delta for this specific model_id.",
+    )
     args = parser.parse_args()
 
     if args.demo or not os.path.exists(args.sessions):
@@ -601,6 +742,30 @@ def main():
         summary = generate_demo_artifacts(output_dir=args.out, seed=args.seed)
     else:
         summary = plot_from_sessions(sessions_file=args.sessions, output_dir=args.out)
+
+    if (not args.demo) and os.path.exists(args.sessions) and args.summarize_models:
+        per_model = summarize_by_model_id(args.sessions)
+        summary["by_model_id"] = per_model
+
+        if args.baseline_model_id:
+            base = per_model.get(args.baseline_model_id)
+            summary["baseline_model_id"] = args.baseline_model_id
+            if base:
+                summary["baseline_avg_final_reward"] = base["avg_final_reward"]
+            else:
+                summary["baseline_avg_final_reward"] = None
+
+            if args.compare_model_id:
+                cmp_ = per_model.get(args.compare_model_id)
+                summary["compare_model_id"] = args.compare_model_id
+                if base and cmp_:
+                    summary["improvement_over_baseline"] = round(
+                        float(cmp_["avg_final_reward"]) - float(base["avg_final_reward"]), 4
+                    )
+                else:
+                    summary["improvement_over_baseline"] = None
+
+        _write_summary(summary, args.out)
 
     return 0
 
