@@ -1,5 +1,6 @@
 spec_version: 1
 name: genesis_env
+description: "GENESIS — The Autonomous Startup Gauntlet. Multi-agent, long-horizon startup simulation with 42 MCP tools, 11-component composable rubric, adaptive MarketMaker, and 5 role-specialized agents."
 type: space
 runtime: fastapi
 app: server.app:app

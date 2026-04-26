@@ -103,12 +103,18 @@ parser.add_argument(
     action="store_true",
     help="Speed-first profile (fewer generations, shorter completions, fewer days).",
 )
+parser.add_argument(
+    "--log-dir",
+    type=str,
+    default="outputs/evals",
+    help="Directory for training_log.jsonl and training_progress.png.",
+)
 args, _ = parser.parse_known_args()
 
 # Apply a conservative speed profile for laptop GPUs / time-boxed runs.
 if args.fast:
-    if args.num_generations > 1:
-        args.num_generations = 1
+    # GRPO requires ≥ 2 generations per prompt (group advantage calculation).
+    args.num_generations = max(2, min(args.num_generations, 2))
     if args.max_completion_length > 96:
         args.max_completion_length = 96
     if args.dataset_multiplier > 8:
@@ -317,6 +323,23 @@ def _parse_tool_calls(text: str, role: str) -> list[dict]:
 
 
 
+# ── Training-time JSONL logging ───────────────────────────────────────────────
+
+_log_path: str | None = None
+_step_counter = {"n": 0}
+
+
+def _ensure_log_dir() -> str:
+    global _log_path
+    if _log_path is not None:
+        return _log_path
+    os.makedirs(args.log_dir, exist_ok=True)
+    _log_path = os.path.join(args.log_dir, "training_log.jsonl")
+    if os.path.exists(_log_path):
+        os.remove(_log_path)
+    return _log_path
+
+
 # ── Reward Function for GRPO ──────────────────────────────────────────────────
 
 def genesis_reward_fn(completions: list[str], prompts: list[str], **kwargs) -> list[float]:
@@ -327,11 +350,12 @@ def genesis_reward_fn(completions: list[str], prompts: list[str], **kwargs) -> l
     compute_reward(state).total as the reward signal (0.0 – 1.0).
 
     Prompts encode the agent role in a system field; we extract it here.
+    Every call is logged to training_log.jsonl for post-hoc plotting.
     """
+    log_path = _ensure_log_dir()
     rewards = []
 
     for completion, prompt in zip(completions, prompts):
-        # Extract role from prompt metadata
         role = _extract_role_from_prompt(prompt)
         seed = random.randint(0, 2**31)
 
@@ -343,13 +367,31 @@ def genesis_reward_fn(completions: list[str], prompts: list[str], **kwargs) -> l
                 difficulty_override=_self_play.current_difficulty,
             )
             reward = float(reward_data.get("reward", 0.0))
+            breakdown = reward_data.get("breakdown", {}) if isinstance(reward_data, dict) else {}
             _self_play.record(reward, weaknesses)
             _self_play.next_difficulty()
-            rewards.append(reward)
         except Exception as e:
-            # Failed episode gets zero reward
             print(f"[WARN] Episode failed: {e}", file=sys.stderr)
-            rewards.append(0.0)
+            reward = 0.0
+            breakdown = {}
+            weaknesses = []
+
+        rewards.append(reward)
+
+        _step_counter["n"] += 1
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "step": _step_counter["n"],
+                    "role": role,
+                    "reward": reward,
+                    "difficulty": _self_play.current_difficulty,
+                    "completion_preview": completion[:160] if isinstance(completion, str) else str(completion)[:160],
+                    "breakdown": {k: float(v) for k, v in breakdown.items() if isinstance(v, (int, float))},
+                    "weaknesses": weaknesses,
+                }) + "\n")
+        except Exception:
+            pass
 
     return rewards
 
@@ -522,6 +564,75 @@ def build_dataset(n_samples: int = 200) -> list[dict]:
     return dataset
 
 
+# ── Training-evidence plot ─────────────────────────────────────────────
+
+def plot_training_progress() -> str | None:
+    """Render reward + difficulty curves from training_log.jsonl."""
+    log_path = os.path.join(args.log_dir, "training_log.jsonl")
+    if not os.path.exists(log_path):
+        return None
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        print("[plot] matplotlib/numpy unavailable; skipping plot.")
+        return None
+
+    rows = []
+    with open(log_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    if not rows:
+        return None
+
+    steps = [r["step"] for r in rows]
+    rewards = [r["reward"] for r in rows]
+    difficulty = [r.get("difficulty", 1) for r in rows]
+    window = max(5, len(rewards) // 20)
+    if len(rewards) >= window:
+        ma = np.convolve(rewards, np.ones(window) / window, mode="valid")
+        ma_x = list(range(window, len(rewards) + 1))
+    else:
+        ma, ma_x = [], []
+
+    out_path = os.path.join(args.log_dir, "training_progress.png")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=110)
+
+    ax = axes[0]
+    ax.scatter(steps, rewards, s=14, alpha=0.35, color="#6366f1", label="reward / step")
+    if len(ma) > 0:
+        ax.plot(ma_x, ma, color="#ef4444", linewidth=2.0, label=f"MA ({window})")
+    ax.set_xlabel("training step (reward-fn call)")
+    ax.set_ylabel("episode reward (0–1)")
+    ax.set_ylim(0, 1)
+    ax.set_title("GENESIS GRPO — reward over training")
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="lower right")
+
+    ax2 = axes[1]
+    ax2.plot(steps, difficulty, color="#06b6d4", linewidth=2.0)
+    ax2.set_xlabel("training step")
+    ax2.set_ylabel("MarketMaker difficulty (1–5)")
+    ax2.set_yticks([1, 2, 3, 4, 5])
+    ax2.set_title("Adaptive curriculum")
+    ax2.grid(True, alpha=0.25)
+
+    fig.suptitle("GENESIS — training evidence", fontweight="bold")
+    fig.tight_layout()
+    fig.savefig(out_path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[plot] wrote {out_path}")
+    return out_path
+
+
 # ── Smoke Test ────────────────────────────────────────────────────────────────
 
 def smoke_test():
@@ -689,14 +800,17 @@ def train():
     tokenizer.save_pretrained(save_path)
     print(f"\nTraining complete. Model saved to {save_path}")
 
+    # ── Plot training evidence ─────────────────────────────────────
+    plot_training_progress()
+
     # ── Eval summary ──────────────────────────────────────────────
     print("\nRunning final eval episode...")
     test_reward_data, _ = run_episode(
         role="ceo",
-        action_text='{"tool": "make_decision", "args": {"decision_type": "strategic", "decision": "Focus on PMF", "reasoning": "Early stage"}}',
+        action_text='{"tool": "write_company_brain", "args": {"key": "strategy_overview", "value": "Focus on enterprise PMF + Series A fundraising while maintaining 18-month runway."}}',
         seed=999,
     )
-    print(f"Baseline reward (random CEO action): {float(test_reward_data.get('reward', 0.0)):.4f}")
+    print(f"Post-training eval reward (CEO): {float(test_reward_data.get('reward', 0.0)):.4f}")
 
 
 # ── Server Lifecycle ──────────────────────────────────────────────────────────

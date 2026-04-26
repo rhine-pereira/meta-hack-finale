@@ -9,7 +9,7 @@ Most business simulations optimize a single KPI (revenue, valuation, throughput)
 GENESIS models this reality directly:
 
 - 5 role-specialized agents (CEO, CTO, Sales, People, CFO)
-- 28 MCP tools with realistic side effects and delays
+- 42 MCP tools with realistic side effects and delays
 - 11-component reward rubric balancing growth, health, and resilience
 - Personal crisis events to test emotional intelligence under pressure
 - Adaptive adversary (MarketMaker) that escalates difficulty
@@ -38,7 +38,7 @@ Gauntlet mode runs for 540 days with weekly personal crises. Agents must survive
 
 The training pipeline includes a minimal Unsloth + TRL setup and produces reproducible reward artifacts.
 
-Training results (GRPO, 50 steps, Qwen2.5-1.5B-Instruct):
+Training results (GRPO, 50 steps, Qwen2.5-3B-Instruct):
 
 | | Baseline (untrained) | Post-GRPO trained |
 |---|---|---|

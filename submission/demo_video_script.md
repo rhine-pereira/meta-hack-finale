@@ -6,7 +6,7 @@
 
 ## 0:10-0:25 - Environment Overview
 
-"Five specialized agents - CEO, CTO, Sales, People, and CFO - operate with partial observability. They use 28 MCP tools to ship features, hire, raise, communicate with customers, and pivot when needed."
+"Five specialized agents - CEO, CTO, Sales, People, and CFO - operate with partial observability. They use 42 MCP tools to ship features, hire, raise, communicate with customers, and pivot when needed."
 
 ## 0:25-0:45 - Realism and Difficulty
 

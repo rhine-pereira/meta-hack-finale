@@ -50,21 +50,17 @@ app.add_middleware(
     expose_headers=["mcp-session-id"],
 )
 
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    # Log incoming request
-    session_id = request.headers.get("mcp-session-id")
-    # print(f"Incoming request: {request.method} {request.url.path}, session-id: {session_id}")
-    
-    response = await call_next(request)
-    
-    # Ensure session id is exposed
-    if "mcp-session-id" in response.headers:
-        pass # Already there
-    elif session_id:
-        response.headers["mcp-session-id"] = session_id
-        
-    return response
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class SessionIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get("mcp-session-id")
+        response = await call_next(request)
+        if "mcp-session-id" not in response.headers and session_id:
+            response.headers["mcp-session-id"] = session_id
+        return response
+
+app.add_middleware(SessionIdMiddleware)
 
 from starlette.responses import JSONResponse, StreamingResponse
 

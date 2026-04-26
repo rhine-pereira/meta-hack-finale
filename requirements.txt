@@ -1,30 +1,21 @@
-# GENESIS — Core Dependencies
-openenv-core[core]
-fastapi
-pydantic
-uvicorn
-requests
-fastmcp
-numpy
-matplotlib
+# GENESIS — Core dependencies (server / environment)
+openenv-core[core]>=0.2.3
+fastapi>=0.115.0
+pydantic>=2.0.0
+uvicorn[standard]>=0.24.0
+requests>=2.31.0
+fastmcp>=0.1.0
+numpy>=1.24.0
+matplotlib>=3.8.0
 pillow
-
-# LLM & Training (Compulsory)
-# Note: torch is usually managed separately by Colab/Cuda environment
-transformers>=4.45.0
-trl>=0.10.0
-datasets
-peft
-bitsandbytes
-accelerate
-unsloth
-
-# Solana & Blockchain
-solana
-solders
-anchorpy
-python-dotenv
 base58
 
-# Utils
-PyPDF2
+# Training (GPU required — install these on top of the core deps)
+# Note: torch is pinned separately on Colab to avoid Triton/PTX mismatches.
+transformers>=4.44.0
+trl>=0.11.0
+datasets>=2.20.0
+peft>=0.12.0
+bitsandbytes>=0.43.0
+accelerate>=0.34.0
+# unsloth  # optional; recommended on Colab T4 — install via: pip install unsloth
