@@ -711,21 +711,71 @@ def handle_personal_crisis(episode_id: str, agent_role: str, crisis_id: str, res
     if agent_role != crisis.target_role.value:
         return {"error": f"Unauthorized. Only the {crisis.target_role.value} can resolve this crisis."}
     
-    # Quality scoring - improved heuristic
+    # Quality scoring — multi-dimensional rubric that rewards empathy,
+    # structured action plans, concrete commitments, and appropriate length.
     def score_response(text: str) -> float:
-        s = 0.3  # Base
-        if len(text) > 500: s += 0.3
-        elif len(text) > 200: s += 0.15
-        
-        # Keywords for empathy, action, and structure
-        indicators = {
-            "understand": 0.05, "feel": 0.05, "plan": 0.05, "steps": 0.05,
-            "equity": 0.1, "bonus": 0.1, "vacation": 0.1, "talk": 0.05
+        lower = text.lower()
+        word_count = len(text.split())
+        s = 0.25  # baseline — any response beats ignoring the crisis
+
+        # Length: reward substantive responses; diminishing returns above ~300 words
+        if word_count >= 250:
+            s += 0.25
+        elif word_count >= 100:
+            s += 0.15
+        elif word_count >= 40:
+            s += 0.05
+
+        # Empathy signals (acknowledging the person's experience)
+        empathy_kws = {
+            "understand": 0.04, "appreciate": 0.04, "hear you": 0.05,
+            "feel": 0.03, "difficult": 0.03, "hard": 0.02,
+            "respect": 0.03, "matter": 0.02, "care": 0.03,
         }
-        for kw, bonus in indicators.items():
-            if kw in text.lower():
+        for kw, bonus in empathy_kws.items():
+            if kw in lower:
                 s += bonus
-        return min(1.0, s)
+
+        # Action & structure signals (concrete next steps)
+        action_kws = {
+            "plan": 0.05, "steps": 0.05, "step 1": 0.07, "step 2": 0.05,
+            "first": 0.03, "second": 0.03, "third": 0.03,
+            "action": 0.04, "commit": 0.04, "will": 0.02,
+            "schedule": 0.04, "meeting": 0.03, "follow up": 0.05,
+            "follow-up": 0.05, "7 days": 0.04, "next week": 0.04,
+        }
+        for kw, bonus in action_kws.items():
+            if kw in lower:
+                s += bonus
+
+        # Concrete retention / compensation signals
+        retention_kws = {
+            "equity": 0.06, "bonus": 0.06, "raise": 0.05, "salary": 0.04,
+            "vacation": 0.05, "time off": 0.05, "sabbatical": 0.06,
+            "ownership": 0.05, "refresh": 0.05, "vesting": 0.04,
+            "role change": 0.04, "promotion": 0.04, "autonomy": 0.03,
+        }
+        for kw, bonus in retention_kws.items():
+            if kw in lower:
+                s += bonus
+
+        # Communication signals (transparency, alignment)
+        comm_kws = {
+            "transparent": 0.03, "open": 0.02, "honest": 0.03,
+            "team": 0.02, "together": 0.02, "talk": 0.03, "discuss": 0.03,
+            "alignment": 0.03, "cofounder": 0.02, "co-founder": 0.02,
+        }
+        for kw, bonus in comm_kws.items():
+            if kw in lower:
+                s += bonus
+
+        # Penalty for vague / dismissive responses
+        dismissal_kws = ["just ignore", "not important", "later", "too busy"]
+        for kw in dismissal_kws:
+            if kw in lower:
+                s -= 0.10
+
+        return max(0.0, min(1.0, s))
 
     score = score_response(response)
     
@@ -1823,6 +1873,233 @@ def log_human_action(episode_id: str, role: str, action: str, details: str = "")
         "entry": entry,
         "human_action_count": len(state.human_action_log),
         "warning": warning,
+    }
+
+
+# ── USP 4: On-Demand ML Model Inference ──────────────────────────────────────
+#
+# These tools load the genesis_final LoRA adapter once into a process-level
+# singleton and expose it as callable MCP tools.  The adapter is loaded lazily
+# on first use so the server starts instantly even without GPU / large RAM.
+
+_ML_MODEL = None        # PeftModel once loaded
+_ML_TOKENIZER = None    # Qwen tokenizer once loaded
+_ML_LOAD_ERROR: str | None = None   # Error message if loading failed
+
+
+def _ensure_ml_model():
+    """Lazily load the LoRA adapter.  No-op if already loaded or failed."""
+    global _ML_MODEL, _ML_TOKENIZER, _ML_LOAD_ERROR
+
+    if _ML_MODEL is not None or _ML_LOAD_ERROR is not None:
+        return
+
+    adapter_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "models", "genesis_final",
+    )
+    if not os.path.isdir(adapter_path):
+        _ML_LOAD_ERROR = (
+            f"Adapter directory not found: {adapter_path}. "
+            "Run training first or place the adapter at models/genesis_final/."
+        )
+        return
+
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from peft import PeftModel
+
+        base_model = "Qwen/Qwen2.5-3B-Instruct"
+        device_map = "auto" if torch.cuda.is_available() else None
+        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+
+        tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            device_map=device_map,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+        model = PeftModel.from_pretrained(model, adapter_path)
+        model.eval()
+
+        _ML_MODEL = model
+        _ML_TOKENIZER = tokenizer
+
+    except Exception as exc:
+        _ML_LOAD_ERROR = f"Failed to load ML model: {exc}"
+
+
+@mcp.tool()
+def ml_model_status() -> dict:
+    """
+    Check whether the genesis_final LoRA adapter is loaded and ready.
+
+    Returns loading status, device info, and parameter counts.
+    """
+    _ensure_ml_model()
+    if _ML_LOAD_ERROR:
+        return {"loaded": False, "error": _ML_LOAD_ERROR}
+
+    if _ML_MODEL is None:
+        return {"loaded": False, "status": "not_attempted"}
+
+    try:
+        import torch
+        total = sum(p.numel() for p in _ML_MODEL.parameters()) / 1e6
+        trainable = sum(p.numel() for p in _ML_MODEL.parameters() if p.requires_grad) / 1e6
+        device = str(next(_ML_MODEL.parameters()).device)
+    except Exception:
+        total = trainable = 0.0
+        device = "unknown"
+
+    return {
+        "loaded": True,
+        "base_model": "Qwen/Qwen2.5-3B-Instruct",
+        "adapter": "genesis_final",
+        "total_params_M": round(total, 1),
+        "trainable_params_M": round(trainable, 1),
+        "device": device,
+    }
+
+
+@mcp.tool()
+def ml_generate_decision(
+    episode_id: str,
+    agent_role: str,
+    max_new_tokens: int = 200,
+    temperature: float = 0.7,
+    execute: bool = True,
+) -> dict:
+    """
+    Use the fine-tuned genesis_final LoRA model to generate and (optionally)
+    execute a tool call for the given agent role in the current episode.
+
+    The model reads the latest daily briefing, builds a role-specific prompt
+    using the Qwen chat template, generates a JSON tool call, and executes it
+    against the simulation state.
+
+    Args:
+        episode_id:      Existing session identifier.
+        agent_role:      ceo, cto, sales, people, or cfo.
+        max_new_tokens:  Max tokens to generate (default 200).
+        temperature:     Sampling temperature (default 0.7).
+        execute:         If True (default), execute the generated tool call.
+                         Set to False to preview without side effects.
+    """
+    _ensure_ml_model()
+    if _ML_LOAD_ERROR:
+        return {"success": False, "error": _ML_LOAD_ERROR}
+    if _ML_MODEL is None:
+        return {"success": False, "error": "ML model not loaded."}
+
+    valid_roles = {"ceo", "cto", "sales", "people", "cfo"}
+    if agent_role not in valid_roles:
+        return {"success": False, "error": f"Unknown role '{agent_role}'."}
+
+    state = _get_state(episode_id)
+
+    # Build a briefing dict from the current state (no tick — read-only snapshot)
+    from .role_views import get_filtered_view
+    from .world_state import AgentRole as _AgentRole
+
+    role_enum = _AgentRole(agent_role)
+    role_obs = get_filtered_view(state, role_enum)
+    active_crises = [
+        {"id": c.id, "severity": c.severity, "description": c.description,
+         "target_role": c.target_role.value}
+        for c in state.personal_crises if not c.resolved and c.target_role == role_enum
+    ]
+    briefing = {
+        "day": state.day,
+        "world_events": [],
+        "role_observation": role_obs,
+        "active_crises": active_crises,
+        "reward": state.cumulative_reward,
+        "is_done": state.is_done(),
+    }
+
+    # Import prompt builder + generator from ml_inference (no circular import —
+    # ml_inference only imports from client, not from server)
+    try:
+        from ml_inference import build_prompt, generate_tool_call, execute_tool_call
+    except ImportError as exc:
+        return {"success": False, "error": f"Could not import ml_inference: {exc}"}
+
+    prompt = build_prompt(agent_role, briefing, _ML_TOKENIZER)
+
+    completion, tool_call = generate_tool_call(
+        _ML_MODEL,
+        _ML_TOKENIZER,
+        prompt,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+
+    result = None
+    execution_error = None
+    if execute and tool_call:
+        # Map tool names to the Python functions defined in this module.
+        # This avoids any HTTP round-trip or internal MCP registry lookups.
+        _TOOL_MAP = {
+            "make_decision": make_decision,
+            "build_feature": build_feature,
+            "write_company_brain": write_company_brain,
+            "read_company_brain": read_company_brain,
+            "check_bank_balance": check_bank_balance,
+            "check_team_morale": check_team_morale,
+            "analyze_market": analyze_market,
+            "send_message": send_message,
+            "hire_candidate": hire_candidate,
+            "fire_employee": fire_employee,
+            "negotiate_with_investor": negotiate_with_investor,
+            "handle_personal_crisis": handle_personal_crisis,
+            "pivot_company": pivot_company,
+            "deploy_to_production": deploy_to_production,
+            "run_load_test": run_load_test,
+            "review_codebase_health": review_codebase_health,
+            "send_customer_email": send_customer_email,
+            "update_crm": update_crm,
+            "run_competitive_analysis": run_competitive_analysis,
+            "create_financial_model": create_financial_model,
+            "send_investor_update": send_investor_update,
+            "post_job_listing": post_job_listing,
+            "conduct_interview": conduct_interview,
+            "hold_one_on_one": hold_one_on_one,
+            "get_company_state": get_company_state,
+        }
+
+        class _DirectEnv:
+            """Calls tool functions directly without HTTP."""
+            def call_tool(self_inner, name: str, **kwargs):
+                fn = _TOOL_MAP.get(name)
+                if fn is None:
+                    raise ValueError(f"Tool '{name}' not found in direct dispatch map.")
+                return fn(**kwargs)
+
+        try:
+            direct_env = _DirectEnv()
+            result = execute_tool_call(
+                direct_env, episode_id, agent_role, tool_call, briefing, verbose=False
+            )
+        except Exception as exc:
+            execution_error = str(exc)
+
+    return {
+        "success": True,
+        "role": agent_role,
+        "day": state.day,
+        "generated_tool": tool_call.get("tool") if tool_call else None,
+        "generated_args": tool_call.get("args") if tool_call else None,
+        "raw_completion": completion[:500],
+        "executed": execute and tool_call is not None and execution_error is None,
+        "execution_result": result,
+        "execution_error": execution_error,
     }
 
 
