@@ -7,11 +7,11 @@ import { EpisodeGuard } from "../session/EpisodeGuard";
 
 interface MainLayoutProps {
   children: ReactNode;
+  requireEpisode?: boolean;
 }
 
-export const MainLayout = ({ children }: MainLayoutProps) => {
-  return (
-    <EpisodeGuard>
+export const MainLayout = ({ children, requireEpisode = true }: MainLayoutProps) => {
+  const content = (
       <div className="flex min-h-screen">
         <TopBar />
         <Sidebar />
@@ -19,6 +19,9 @@ export const MainLayout = ({ children }: MainLayoutProps) => {
           {children}
         </main>
       </div>
-    </EpisodeGuard>
   );
+
+  if (!requireEpisode) return content;
+
+  return <EpisodeGuard>{content}</EpisodeGuard>;
 };
