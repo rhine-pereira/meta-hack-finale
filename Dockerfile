@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MPLBACKEND=Agg
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl && \
     rm -rf /var/lib/apt/lists/*
@@ -9,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml .
 COPY server/ server/
 COPY client.py .
+COPY ml_inference.py .
 COPY __init__.py .
 COPY openenv.yaml .
 
