@@ -1,9 +1,9 @@
 {
-  "num_sessions_with_history": 110,
-  "avg_final_reward": 0.4547,
-  "best_final_reward": 0.5022,
+  "num_sessions_with_history": 118,
+  "avg_final_reward": 0.4558,
+  "best_final_reward": 0.5924,
   "worst_final_reward": 0.2875,
-  "improvement_over_baseline": -0.0006,
+  "improvement_over_baseline": 0.0097,
   "by_model_id": {
     "baseline_static": {
       "num_sessions": 40,
@@ -28,9 +28,27 @@
       "avg_final_reward": 0.3519,
       "best_final_reward": 0.463,
       "worst_final_reward": 0.2875
+    },
+    "demo-model": {
+      "num_sessions": 5,
+      "avg_final_reward": 0.4712,
+      "best_final_reward": 0.5924,
+      "worst_final_reward": 0.386
+    },
+    "demo-model-rival": {
+      "num_sessions": 2,
+      "avg_final_reward": 0.5111,
+      "best_final_reward": 0.5111,
+      "worst_final_reward": 0.5111
+    },
+    "gemini-1.5-pro": {
+      "num_sessions": 1,
+      "avg_final_reward": 0.3982,
+      "best_final_reward": 0.3982,
+      "worst_final_reward": 0.3982
     }
   },
   "baseline_model_id": "baseline_static",
   "baseline_avg_final_reward": 0.461,
-  "compare_model_id": "ollama_deepseek_coder_6p7b"
+  "compare_model_id": "ollama_mistral_latest"
 }
