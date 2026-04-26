@@ -24,6 +24,12 @@ import {
   Activity,
   Play,
   Download,
+  Share2,
+  Target,
+  Flame,
+  ArrowRight,
+  BarChart2,
+  GitBranch,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -38,6 +44,13 @@ interface ScenarioSummary {
   category: string;
   num_fork_points: number;
   failure_summary: string;
+}
+
+interface ForkScheduleItem {
+  day: number;
+  title: string;
+  target_role: string;
+  category?: string;
 }
 
 interface ForkComparison {
@@ -92,6 +105,11 @@ const CATEGORY_COLORS: Record<string, string> = {
   hardware: "text-signal-blue border-signal-blue/30 bg-signal-blue/10",
   b2b: "text-accent border-accent/30 bg-accent/10",
   fraud: "text-signal-red border-signal-red/30 bg-signal-red/10",
+  product: "text-signal-blue border-signal-blue/30 bg-signal-blue/10",
+  financial: "text-signal-purple border-signal-purple/30 bg-signal-purple/10",
+  team: "text-role-people border-role-people/30 bg-role-people/10",
+  market: "text-signal-amber border-signal-amber/30 bg-signal-amber/10",
+  ethics: "text-signal-red border-signal-red/30 bg-signal-red/10",
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -264,79 +282,92 @@ const ForkRow = ({ fork, index }: { fork: ForkComparison; index: number }) => {
             transition={{ duration: 0.25 }}
             className="overflow-hidden"
           >
-            <div className="px-5 pb-5 border-t border-border-dim pt-4 grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Left: founders vs AI */}
-              <div className="space-y-4">
-                <div>
-                  <div className="text-[9px] text-text-muted uppercase font-black mb-2 flex items-center gap-1.5">
-                    <XCircle size={10} className="text-signal-red" />
-                    What The Real Founders Did
-                  </div>
-                  <div className="p-3 rounded bg-signal-red/5 border border-signal-red/15 text-[11px] text-text-secondary leading-relaxed">
-                    {fork.what_founders_did}
-                  </div>
+            <div className="px-5 pb-5 border-t border-border-dim pt-4 space-y-5">
+              {/* Context summary */}
+              <div>
+                <div className="text-[9px] text-text-muted uppercase font-black mb-2 flex items-center gap-1.5">
+                  <GitBranch size={10} className="text-accent" />
+                  Historical Context
                 </div>
-                <div>
-                  <div className="text-[9px] text-text-muted uppercase font-black mb-2 flex items-center gap-1.5">
-                    <CheckCircle2 size={10} className="text-signal-green" />
-                    What The AI Agents Did
-                  </div>
-                  <div className={cn(
-                    "p-3 rounded border text-[11px] leading-relaxed",
-                    notReached ? "text-text-muted border-border-dim bg-bg-void italic" :
-                    (fork.ai_score ?? 0) >= 0.55 ? "text-text-secondary border-signal-green/15 bg-signal-green/5" :
-                    "text-text-secondary border-signal-amber/15 bg-signal-amber/5"
-                  )}>
-                    {fork.ai_response}
-                  </div>
+                <div className="p-3 rounded bg-bg-void border border-border-dim text-[11px] text-text-secondary leading-relaxed">
+                  {fork.context_summary}
                 </div>
               </div>
 
-              {/* Right: outcomes + metrics */}
-              <div className="space-y-4">
-                <div>
-                  <div className="text-[9px] text-text-muted uppercase font-black mb-2">Historical Outcome</div>
-                  <div className="p-3 rounded bg-bg-void border border-border-dim text-[11px] text-text-secondary leading-relaxed">
-                    {fork.known_outcome}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* Left: founders vs AI */}
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[9px] text-text-muted uppercase font-black mb-2 flex items-center gap-1.5">
+                      <XCircle size={10} className="text-signal-red" />
+                      What The Real Founders Did
+                    </div>
+                    <div className="p-3 rounded bg-signal-red/5 border border-signal-red/15 text-[11px] text-text-secondary leading-relaxed">
+                      {fork.what_founders_did}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-text-muted uppercase font-black mb-2 flex items-center gap-1.5">
+                      <CheckCircle2 size={10} className="text-signal-green" />
+                      What The AI Agents Did
+                    </div>
+                    <div className={cn(
+                      "p-3 rounded border text-[11px] leading-relaxed",
+                      notReached ? "text-text-muted border-border-dim bg-bg-void italic" :
+                      (fork.ai_score ?? 0) >= 0.55 ? "text-text-secondary border-signal-green/15 bg-signal-green/5" :
+                      "text-text-secondary border-signal-amber/15 bg-signal-amber/5"
+                    )}>
+                      {fork.ai_response}
+                    </div>
                   </div>
                 </div>
 
-                {!noScore && (
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between text-[9px] font-black text-text-muted uppercase mb-1">
-                        <span>AI Decision Score</span>
-                        <span className={cn(
-                          (fork.ai_score ?? 0) >= 0.70 ? "text-signal-green" :
-                          (fork.ai_score ?? 0) >= 0.50 ? "text-signal-amber" :
-                          "text-signal-red"
-                        )}>{fork.divergence_label}</span>
-                      </div>
-                      <ScoreBar score={fork.ai_score ?? 0} />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="p-2 rounded bg-bg-void border border-border-dim">
-                        <div className="text-[9px] text-text-muted uppercase font-black mb-1">Value at Stake</div>
-                        <div className="text-[12px] font-mono text-signal-red">{formatUSD(fork.value_at_stake_usd)}</div>
-                      </div>
-                      <div className={cn(
-                        "p-2 rounded border",
-                        fork.estimated_recovery_usd > 0 ? "bg-signal-green/5 border-signal-green/20" : "bg-bg-void border-border-dim"
-                      )}>
-                        <div className="text-[9px] text-text-muted uppercase font-black mb-1">Est. Recovered</div>
-                        <div className={cn(
-                          "text-[12px] font-mono",
-                          fork.estimated_recovery_usd > 0 ? "text-signal-green" : "text-text-muted"
-                        )}>{formatUSD(fork.estimated_recovery_usd)}</div>
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded bg-accent/5 border border-accent/15 text-[10px] text-text-secondary leading-relaxed">
-                      {fork.outcome_narrative}
+                {/* Right: outcomes + metrics */}
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[9px] text-text-muted uppercase font-black mb-2">Historical Outcome</div>
+                    <div className="p-3 rounded bg-bg-void border border-border-dim text-[11px] text-text-secondary leading-relaxed">
+                      {fork.known_outcome}
                     </div>
                   </div>
-                )}
+
+                  {!noScore && (
+                    <div className="space-y-3">
+                      <div>
+                        <div className="flex justify-between text-[9px] font-black text-text-muted uppercase mb-1">
+                          <span>AI Decision Score</span>
+                          <span className={cn(
+                            (fork.ai_score ?? 0) >= 0.70 ? "text-signal-green" :
+                            (fork.ai_score ?? 0) >= 0.50 ? "text-signal-amber" :
+                            "text-signal-red"
+                          )}>{fork.divergence_label}</span>
+                        </div>
+                        <ScoreBar score={fork.ai_score ?? 0} />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-2 rounded bg-bg-void border border-border-dim">
+                          <div className="text-[9px] text-text-muted uppercase font-black mb-1">Value at Stake</div>
+                          <div className="text-[12px] font-mono text-signal-red">{formatUSD(fork.value_at_stake_usd)}</div>
+                        </div>
+                        <div className={cn(
+                          "p-2 rounded border",
+                          fork.estimated_recovery_usd > 0 ? "bg-signal-green/5 border-signal-green/20" : "bg-bg-void border-border-dim"
+                        )}>
+                          <div className="text-[9px] text-text-muted uppercase font-black mb-1">Est. Recovered</div>
+                          <div className={cn(
+                            "text-[12px] font-mono",
+                            fork.estimated_recovery_usd > 0 ? "text-signal-green" : "text-text-muted"
+                          )}>{formatUSD(fork.estimated_recovery_usd)}</div>
+                        </div>
+                      </div>
+
+                      <div className="p-3 rounded bg-accent/5 border border-accent/15 text-[10px] text-text-secondary leading-relaxed">
+                        {fork.outcome_narrative}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
@@ -346,66 +377,198 @@ const ForkRow = ({ fork, index }: { fork: ForkComparison; index: number }) => {
   );
 };
 
-// ── Resurrection Report Panel ─────────────────────────────────────────────────
+// ── Recovery Arc Visualizer ────────────────────────────────────────────────────
 
-const ResurrectionReportPanel = ({ report }: { report: ResurrectionReport }) => {
+const RecoveryArc = ({ report }: { report: ResurrectionReport }) => {
+  const scored = report.fork_comparisons.filter((f) => f.ai_score !== null);
+  const maxVal = Math.max(report.total_value_at_stake_usd, 1);
+
+  return (
+    <div className="glass-panel p-5 rounded-xl border border-border-dim">
+      <div className="text-[9px] text-text-muted uppercase font-black mb-4 tracking-widest flex items-center gap-2">
+        <BarChart2 size={12} className="text-accent" />
+        Fork-by-Fork Value Recovery
+      </div>
+      <div className="flex items-end gap-2 h-20">
+        {report.fork_comparisons.map((fork, i) => {
+          const atStake = fork.value_at_stake_usd / maxVal;
+          const recovered = fork.estimated_recovery_usd / maxVal;
+          const notReached = fork.divergence_label === "NOT REACHED";
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
+              <div className="w-full flex items-end gap-0.5 h-16">
+                {/* At-stake bar */}
+                <div
+                  className="flex-1 rounded-t bg-signal-red/20 border border-signal-red/20"
+                  style={{ height: `${atStake * 100}%` }}
+                />
+                {/* Recovered bar */}
+                <div
+                  className={cn(
+                    "flex-1 rounded-t",
+                    notReached ? "bg-border-dim" :
+                    (fork.ai_score ?? 0) >= 0.70 ? "bg-signal-green/60 border border-signal-green/30" :
+                    (fork.ai_score ?? 0) >= 0.50 ? "bg-signal-amber/60 border border-signal-amber/30" :
+                    "bg-signal-red/40 border border-signal-red/20"
+                  )}
+                  style={{ height: `${recovered * 100}%` }}
+                />
+              </div>
+              <div className="text-[8px] font-mono text-text-muted">D{fork.day}</div>
+
+              {/* Tooltip */}
+              <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:flex flex-col items-center z-10 pointer-events-none">
+                <div className="bg-bg-elevated border border-border-active rounded px-2 py-1.5 text-[9px] font-mono text-text-primary whitespace-nowrap shadow-lg">
+                  <div className="font-black text-text-primary truncate max-w-[120px]">{fork.fork_title}</div>
+                  <div className="text-signal-red">At stake: {formatUSD(fork.value_at_stake_usd)}</div>
+                  {!notReached && <div className="text-signal-green">Recovered: {formatUSD(fork.estimated_recovery_usd)}</div>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-4 mt-3 text-[9px] font-black text-text-muted uppercase">
+        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-signal-red/40 border border-signal-red/30" /> Value at Stake</div>
+        <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-sm bg-signal-green/50 border border-signal-green/30" /> Estimated Recovered</div>
+      </div>
+    </div>
+  );
+};
+
+// ── Report Hero ────────────────────────────────────────────────────────────────
+
+const ReportHero = ({ report }: { report: ResurrectionReport }) => {
   const verdictColor =
-    report.overall_verdict.startsWith("RESURRECTION SUCCESSFUL") ? "text-signal-green border-signal-green/20 bg-signal-green/5" :
-    report.overall_verdict.startsWith("PARTIAL") ? "text-signal-amber border-signal-amber/20 bg-signal-amber/5" :
-    report.overall_verdict.startsWith("NARROW") ? "text-signal-amber border-signal-amber/20 bg-signal-amber/5" :
-    "text-signal-red border-signal-red/20 bg-signal-red/5";
+    report.overall_verdict.startsWith("RESURRECTION SUCCESSFUL") ? "border-signal-green/30 bg-signal-green/5" :
+    report.overall_verdict.startsWith("PARTIAL") ? "border-signal-amber/30 bg-signal-amber/5" :
+    report.overall_verdict.startsWith("NARROW") ? "border-signal-amber/30 bg-signal-amber/5" :
+    "border-signal-red/30 bg-signal-red/5";
+
+  const verdictTextColor =
+    report.overall_verdict.startsWith("RESURRECTION SUCCESSFUL") ? "text-signal-green" :
+    report.overall_verdict.startsWith("PARTIAL") ? "text-signal-amber" :
+    report.overall_verdict.startsWith("NARROW") ? "text-signal-amber" :
+    "text-signal-red";
 
   const recoveryPct = report.total_value_at_stake_usd > 0
     ? Math.round((report.total_estimated_recovery_usd / report.total_value_at_stake_usd) * 100)
     : 0;
 
+  const scoreColor = report.avg_ai_decision_score >= 0.65 ? "text-signal-green" :
+    report.avg_ai_decision_score >= 0.45 ? "text-signal-amber" : "text-signal-red";
+
   return (
-    <div className="space-y-6">
-      {/* Verdict banner */}
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={cn("p-5 rounded-xl border", verdictColor)}
-      >
-        <div className="flex items-start gap-3">
-          <Zap size={20} className="flex-shrink-0 mt-0.5" />
-          <div>
-            <div className="text-[10px] font-black uppercase tracking-widest mb-1 opacity-70">Overall Verdict</div>
-            <div className="text-sm font-bold leading-snug">{report.overall_verdict}</div>
+    <motion.div
+      initial={{ opacity: 0, y: -12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn("rounded-2xl border p-6 relative overflow-hidden", verdictColor)}
+    >
+      {/* Background glow */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className={cn(
+          "absolute top-0 right-0 w-64 h-64 rounded-full blur-3xl opacity-10",
+          report.overall_verdict.startsWith("RESURRECTION SUCCESSFUL") ? "bg-signal-green" :
+          report.overall_verdict.startsWith("PARTIAL") ? "bg-signal-amber" :
+          "bg-signal-red"
+        )} />
+      </div>
+
+      <div className="relative z-10">
+        {/* Company death card */}
+        <div className="flex items-start gap-4 mb-6">
+          <div className="w-14 h-14 rounded-xl bg-signal-red/10 border border-signal-red/20 flex items-center justify-center flex-shrink-0">
+            <Skull size={24} className="text-signal-red" />
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <h2 className="text-2xl font-black text-text-primary uppercase tracking-tight">{report.company_name}</h2>
+              <span className="text-text-muted font-mono text-sm">({report.year_founded}–{report.year_failed})</span>
+              <span className="px-2 py-0.5 rounded border border-signal-red/30 text-signal-red text-[9px] font-black uppercase">FAILED</span>
+            </div>
+            <p className="text-[12px] text-text-secondary mb-2">{report.tagline}</p>
+            <div className="flex items-center gap-1.5 text-[10px] text-text-muted font-mono">
+              <DollarSign size={10} />
+              <span>{formatUSD(report.total_funding_raised)} raised</span>
+              <span className="text-border-active mx-1">·</span>
+              <Clock size={10} />
+              <span>Day {report.simulation_day} simulated</span>
+              <span className="text-border-active mx-1">·</span>
+              <Target size={10} />
+              <span>{report.forks_reached}/{report.forks_total} forks reached</span>
+            </div>
           </div>
         </div>
-      </motion.div>
 
-      {/* Summary metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          {
-            label: "Failures Avoided",
-            value: `${report.failures_avoided}/${report.forks_total}`,
-            color: report.failures_avoided >= report.forks_total / 2 ? "text-signal-green" : "text-signal-amber",
-          },
-          {
-            label: "Avg Decision Score",
-            value: `${(report.avg_ai_decision_score * 100).toFixed(0)}%`,
-            color: report.avg_ai_decision_score >= 0.65 ? "text-signal-green" : report.avg_ai_decision_score >= 0.45 ? "text-signal-amber" : "text-signal-red",
-          },
-          {
-            label: "Value at Stake",
-            value: formatUSD(report.total_value_at_stake_usd),
-            color: "text-signal-red",
-          },
-          {
-            label: "Est. Recovered",
-            value: `${formatUSD(report.total_estimated_recovery_usd)} (${recoveryPct}%)`,
-            color: recoveryPct >= 40 ? "text-signal-green" : "text-signal-amber",
-          },
-        ].map((m, i) => (
-          <div key={i} className="glass-panel p-4 rounded-xl">
-            <div className="text-[9px] text-text-muted uppercase font-black mb-2">{m.label}</div>
-            <div className={cn("text-base font-mono font-black", m.color)}>{m.value}</div>
+        {/* Key metrics row */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          {[
+            {
+              label: "Failures Avoided",
+              value: `${report.failures_avoided}/${report.forks_total}`,
+              color: report.failures_avoided >= report.forks_total / 2 ? "text-signal-green" : "text-signal-amber",
+              icon: CheckCircle2,
+            },
+            {
+              label: "Avg Decision Score",
+              value: `${(report.avg_ai_decision_score * 100).toFixed(0)}%`,
+              color: scoreColor,
+              icon: Activity,
+            },
+            {
+              label: "Value at Stake",
+              value: formatUSD(report.total_value_at_stake_usd),
+              color: "text-signal-red",
+              icon: Flame,
+            },
+            {
+              label: "Est. Recovered",
+              value: `${formatUSD(report.total_estimated_recovery_usd)} (${recoveryPct}%)`,
+              color: recoveryPct >= 40 ? "text-signal-green" : "text-signal-amber",
+              icon: TrendingUp,
+            },
+          ].map((m, i) => (
+            <div key={i} className="glass-panel p-3 rounded-xl border border-border-dim/50">
+              <div className="flex items-center gap-1.5 text-[9px] text-text-muted uppercase font-black mb-1.5">
+                <m.icon size={10} />
+                {m.label}
+              </div>
+              <div className={cn("text-base font-mono font-black", m.color)}>{m.value}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Verdict */}
+        <div className={cn("flex items-start gap-3 p-4 rounded-xl border", verdictColor)}>
+          <Zap size={18} className={cn("flex-shrink-0 mt-0.5", verdictTextColor)} />
+          <div>
+            <div className="text-[9px] font-black uppercase tracking-widest mb-0.5 text-text-muted">Overall Verdict</div>
+            <div className={cn("text-sm font-bold leading-snug", verdictTextColor)}>{report.overall_verdict}</div>
           </div>
-        ))}
+        </div>
       </div>
+    </motion.div>
+  );
+};
+
+// ── Resurrection Report Panel ─────────────────────────────────────────────────
+
+const ResurrectionReportPanel = ({
+  report,
+  onExportJSON,
+  onShare,
+}: {
+  report: ResurrectionReport;
+  onExportJSON: () => void;
+  onShare: () => void;
+}) => {
+  return (
+    <div className="space-y-6">
+      {/* Hero */}
+      <ReportHero report={report} />
+
+      {/* Recovery arc chart */}
+      <RecoveryArc report={report} />
 
       {/* Fork-by-fork comparison */}
       <div>
@@ -422,7 +585,10 @@ const ResurrectionReportPanel = ({ report }: { report: ResurrectionReport }) => 
 
       {/* Resurrection hypothesis */}
       <div className="glass-panel p-5 rounded-xl border border-accent/15 bg-accent/5">
-        <div className="text-[9px] text-accent uppercase font-black mb-2 tracking-widest">Resurrection Hypothesis</div>
+        <div className="text-[9px] text-accent uppercase font-black mb-2 tracking-widest flex items-center gap-1.5">
+          <Zap size={10} />
+          Resurrection Hypothesis
+        </div>
         <p className="text-[12px] text-text-secondary leading-relaxed">{report.resurrection_hypothesis}</p>
       </div>
 
@@ -434,17 +600,48 @@ const ResurrectionReportPanel = ({ report }: { report: ResurrectionReport }) => 
             { label: "Cash Remaining", value: formatUSD(report.final_simulation_metrics.cash_remaining), icon: DollarSign },
             { label: "ARR", value: formatUSD(report.final_simulation_metrics.arr), icon: TrendingUp },
             { label: "Team Size", value: String(report.final_simulation_metrics.team_size), icon: Activity },
-            { label: "Series A", value: report.final_simulation_metrics.series_a_closed ? "CLOSED ✓" : "Open", icon: CheckCircle2 },
+            {
+              label: "Series A",
+              value: report.final_simulation_metrics.series_a_closed ? "CLOSED ✓" : "Not Closed",
+              icon: CheckCircle2,
+              highlight: report.final_simulation_metrics.series_a_closed,
+            },
           ].map((m, i) => (
-            <div key={i} className="p-3 rounded bg-bg-void border border-border-dim">
+            <div key={i} className={cn(
+              "p-3 rounded border",
+              "highlight" in m && m.highlight
+                ? "bg-signal-green/5 border-signal-green/20"
+                : "bg-bg-void border-border-dim"
+            )}>
               <div className="flex items-center gap-1.5 text-[9px] text-text-muted uppercase font-black mb-1">
                 <m.icon size={10} />
                 {m.label}
               </div>
-              <div className="text-[12px] font-mono text-text-primary">{m.value}</div>
+              <div className={cn(
+                "text-[12px] font-mono",
+                "highlight" in m && m.highlight ? "text-signal-green font-black" : "text-text-primary"
+              )}>{m.value}</div>
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Export / Share row */}
+      <div className="flex gap-3 justify-end">
+        <button
+          onClick={onShare}
+          className="flex items-center gap-2 px-4 py-2 border border-border-dim text-text-muted text-[10px] uppercase rounded-lg hover:border-signal-purple/30 hover:text-signal-purple transition-all"
+        >
+          <Share2 size={12} />
+          Copy Share Link
+        </button>
+        <button
+          onClick={onExportJSON}
+          className="flex items-center gap-2 px-4 py-2 border border-border-dim text-text-muted text-[10px] uppercase rounded-lg hover:border-accent/30 hover:text-accent transition-all"
+        >
+          <Download size={12} />
+          Export JSON
+        </button>
       </div>
     </div>
   );
@@ -459,10 +656,12 @@ export default function PostmortemPage() {
   const [loadingScenarios, setLoadingScenarios] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [loadedScenario, setLoadedScenario] = useState<string | null>(null);
+  const [forkSchedule, setForkSchedule] = useState<ForkScheduleItem[]>([]);
   const [report, setReport] = useState<ResurrectionReport | null>(null);
   const [loadingReport, setLoadingReport] = useState(false);
   const [activeTab, setActiveTab] = useState<"select" | "loaded" | "report">("select");
   const [error, setError] = useState<string | null>(null);
+  const [copySuccess, setCopySuccess] = useState(false);
 
   const fetchScenarios = useCallback(async () => {
     setLoadingScenarios(true);
@@ -480,7 +679,6 @@ export default function PostmortemPage() {
   const handleLoadScenario = useCallback(async (scenarioId: string) => {
     let eid = episodeId;
     if (!eid) {
-      // Spin up a session first. Then read the newly created episodeId from the store.
       await reset(difficulty, seed);
       eid = useGenesisStore.getState().episodeId;
     }
@@ -491,11 +689,15 @@ export default function PostmortemPage() {
     setLoadingId(scenarioId);
     setError(null);
     try {
-      await genesisClient.callTool("load_postmortem_scenario", {
+      const result = await genesisClient.callTool("load_postmortem_scenario", {
         episode_id: eid,
         scenario_id: scenarioId,
       });
       setLoadedScenario(scenarioId);
+      // Store fork schedule from the server response
+      if (result.fork_schedule) {
+        setForkSchedule(result.fork_schedule);
+      }
       setActiveTab("loaded");
     } catch (e: any) {
       setError(e?.message || "Failed to load scenario");
@@ -524,6 +726,38 @@ export default function PostmortemPage() {
       setLoadingReport(false);
     }
   }, [episodeId]);
+
+  const handleExportJSON = useCallback(() => {
+    if (!report) return;
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `resurrection-report-${report.company_name.toLowerCase().replace(/\s+/g, "-")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [report]);
+
+  const handleShare = useCallback(async () => {
+    if (!report) return;
+    const summary = [
+      `🔬 GENESIS Resurrection Report: ${report.company_name} (${report.year_founded}–${report.year_failed})`,
+      `💰 ${formatUSD(report.total_funding_raised)} raised then lost`,
+      `🤖 AI avoided ${report.failures_avoided}/${report.forks_total} fatal decisions`,
+      `📊 Avg decision score: ${(report.avg_ai_decision_score * 100).toFixed(0)}%`,
+      `💸 Est. value recovered: ${formatUSD(report.total_estimated_recovery_usd)}`,
+      `🏁 Verdict: ${report.overall_verdict.split("—")[0].trim()}`,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(summary);
+      setCopySuccess(true);
+      setTimeout(() => setCopySuccess(false), 2500);
+    } catch {
+      // Fallback: show in alert
+      alert(summary);
+    }
+  }, [report]);
 
   // Auto-load scenarios on first render
   React.useEffect(() => {
@@ -575,6 +809,21 @@ export default function PostmortemPage() {
             {error}
           </motion.div>
         )}
+
+        {/* Copy success toast */}
+        <AnimatePresence>
+          {copySuccess && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl bg-signal-green/10 border border-signal-green/30 text-signal-green text-[11px] font-black uppercase tracking-widest shadow-lg"
+            >
+              <CheckCircle2 size={14} />
+              Report summary copied to clipboard
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-border-dim pb-0">
@@ -671,37 +920,84 @@ export default function PostmortemPage() {
               </div>
             </div>
 
+            {/* Failure summary */}
+            {selectedScenario.failure_summary && (
+              <div className="glass-panel p-4 rounded-xl border border-signal-red/10">
+                <div className="text-[9px] text-signal-red uppercase font-black mb-2 flex items-center gap-1.5">
+                  <Skull size={10} />
+                  What Went Wrong
+                </div>
+                <p className="text-[11px] text-text-secondary leading-relaxed">{selectedScenario.failure_summary}</p>
+              </div>
+            )}
+
             {/* Instructions */}
             <div className="glass-panel p-5 rounded-xl border border-accent/15">
               <h3 className="text-[10px] font-black text-accent uppercase tracking-widest mb-3">How to Run This Scenario</h3>
               <ol className="space-y-2 text-[11px] text-text-secondary">
-                <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
+                <li className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">1</span>
                   <span>Run the simulation from the Dashboard (Advance Day button). Fork points fire automatically at the scheduled days.</span>
                 </li>
-                <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
+                <li className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">2</span>
                   <span>When a <code className="text-accent bg-accent/10 px-1 rounded text-[10px]">[HISTORICAL FORK]</code> crisis appears in an agent's briefing, the AI resolves it via <code className="text-accent bg-accent/10 px-1 rounded text-[10px]">handle_personal_crisis</code>.</span>
                 </li>
-                <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
+                <li className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">3</span>
                   <span>For each fork, also call <code className="text-accent bg-accent/10 px-1 rounded text-[10px]">record_fork_decision</code> to log the AI's choice for the Resurrection Report.</span>
                 </li>
-                <li className="flex items-start gap-2"><span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">4</span>
+                <li className="flex items-start gap-2">
+                  <span className="w-5 h-5 rounded-full bg-accent/10 border border-accent/20 text-accent text-[9px] font-black flex items-center justify-center flex-shrink-0 mt-0.5">4</span>
                   <span>After all forks have fired (or the simulation ends), click <strong className="text-accent">Generate Report</strong> above to see the Resurrection Report.</span>
                 </li>
               </ol>
             </div>
 
-            {/* Fork schedule */}
+            {/* Fork schedule — real data from server */}
             <div>
-              <h3 className="text-[10px] font-black text-text-muted uppercase tracking-widest mb-3">Scheduled Fork Points</h3>
+              <h3 className="text-[10px] font-black text-text-muted uppercase tracking-widest mb-3 flex items-center gap-2">
+                <GitBranch size={12} className="text-accent" />
+                Scheduled Fork Points
+              </h3>
               <div className="space-y-2">
-                {Array.from({ length: selectedScenario.num_fork_points }).map((_, i) => (
-                  <div key={i} className="flex items-center gap-4 p-3 rounded bg-bg-void border border-border-dim text-[11px]">
-                    <Clock size={12} className="text-text-muted flex-shrink-0" />
-                    <span className="text-text-muted font-mono">Fork {i + 1}</span>
-                    <span className="text-text-primary">See simulation briefing for details</span>
-                    <span className="ml-auto text-text-muted">fires automatically</span>
-                  </div>
-                ))}
+                {forkSchedule.length > 0 ? (
+                  forkSchedule.map((fp, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: i * 0.05 }}
+                      className="flex items-center gap-4 p-3.5 rounded-lg bg-bg-void border border-border-dim text-[11px] group hover:border-accent/20 transition-colors"
+                    >
+                      <div className="w-8 h-8 rounded bg-bg-elevated border border-border-active flex items-center justify-center font-mono text-[10px] text-text-muted flex-shrink-0">
+                        D{fp.day}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-black text-text-primary uppercase tracking-tight truncate">{fp.title}</div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {fp.category && (
+                          <span className={cn("px-1.5 py-0.5 rounded border text-[8px] font-black uppercase", CATEGORY_COLORS[fp.category] ?? "text-text-muted border-border-dim")}>
+                            {fp.category}
+                          </span>
+                        )}
+                        <span className={cn("text-[9px] font-black uppercase", ROLE_COLORS[fp.target_role] ?? "text-text-muted")}>
+                          {fp.target_role?.toUpperCase()}
+                        </span>
+                        <ArrowRight size={10} className="text-border-active group-hover:text-accent transition-colors" />
+                      </div>
+                    </motion.div>
+                  ))
+                ) : (
+                  Array.from({ length: selectedScenario.num_fork_points }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-4 p-3 rounded bg-bg-void border border-border-dim text-[11px] opacity-50">
+                      <Clock size={12} className="text-text-muted flex-shrink-0" />
+                      <span className="text-text-muted font-mono">Fork {i + 1}</span>
+                      <span className="text-text-primary">Fires automatically</span>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
@@ -719,20 +1015,11 @@ export default function PostmortemPage() {
         {/* Tab: Resurrection Report */}
         {activeTab === "report" && report && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-            {/* Report header */}
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">
-                  {report.company_name} — Resurrection Report
-                </h2>
-                <p className="text-[11px] text-text-muted">Simulation Day {report.simulation_day} · {report.forks_reached}/{report.forks_total} forks reached</p>
-              </div>
-              <button className="flex items-center gap-2 px-4 py-2 border border-border-dim text-text-muted text-[10px] uppercase rounded hover:border-accent/30 hover:text-accent transition-all">
-                <Download size={12} />
-                Export JSON
-              </button>
-            </div>
-            <ResurrectionReportPanel report={report} />
+            <ResurrectionReportPanel
+              report={report}
+              onExportJSON={handleExportJSON}
+              onShare={handleShare}
+            />
           </motion.div>
         )}
       </div>
