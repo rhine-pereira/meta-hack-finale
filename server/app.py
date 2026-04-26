@@ -121,7 +121,7 @@ async def root(request: Request):
   <div class="status"><div class="dot"></div>Server running · OpenEnv-compliant MCP ready</div>
   <div class="footer">
     <a href="https://github.com/rhine-pereira/meta-hack-finale" target="_blank">GitHub</a> &nbsp;·&nbsp;
-    <a href="https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb" target="_blank">Training Colab</a> &nbsp;·&nbsp;
+    <a href="https://colab.research.google.com/drive/19MRrUvKXv-xpa_kBKqwLbGY3ACJNYLxm?usp=sharing" target="_blank">Training Colab</a> &nbsp;·&nbsp;
     <a href="/health" target="_blank">/health</a>
   </div>
 </div>

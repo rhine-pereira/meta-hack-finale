@@ -13,9 +13,9 @@ short_description: Multi-agent startup sim · 42 MCP tools · GRPO
 
 **Training LLMs to build, break, and rebuild companies from zero**
 
-[![OpenEnv](https://img.shields.io/badge/OpenEnv-compatible-6366f1)](https://huggingface.co/openenv) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb) [![HF Space](https://img.shields.io/badge/🤗%20Space-JacellJamble%2Fgenesis-blue)](https://huggingface.co/spaces/JacellJamble/genesis)
+[![OpenEnv](https://img.shields.io/badge/OpenEnv-compatible-6366f1)](https://huggingface.co/openenv) [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/19MRrUvKXv-xpa_kBKqwLbGY3ACJNYLxm?usp=sharing) [![HF Space](https://img.shields.io/badge/🤗%20Space-JacellJamble%2Fgenesis-blue)](https://huggingface.co/spaces/JacellJamble/genesis)
 
-[OpenEnv hackathon (India 2026)](https://huggingface.co/openenv) · **Hugging Face Space:** [`https://huggingface.co/spaces/JacellJamble/genesis`](https://huggingface.co/spaces/JacellJamble/genesis) · **Training Colab:** [`colab/training.ipynb`](colab/training.ipynb)
+[OpenEnv hackathon (India 2026)](https://huggingface.co/openenv) · **Hugging Face Space:** [`https://huggingface.co/spaces/JacellJamble/genesis`](https://huggingface.co/spaces/JacellJamble/genesis) · **Training Colab:** [Open in Colab](https://colab.research.google.com/drive/19MRrUvKXv-xpa_kBKqwLbGY3ACJNYLxm?usp=sharing)
 
 ---
 
@@ -379,8 +379,8 @@ Step-by-step publish guide: `docs/huggingface_spaces.md`.
 | Item | Location / URL |
 |------|----------------|
 | **Hugging Face Space** | [`https://huggingface.co/spaces/JacellJamble/genesis`](https://huggingface.co/spaces/JacellJamble/genesis) |
-| **Training Colab notebook** | [`colab/training.ipynb`](colab/training.ipynb) — end-to-end (TRL GRPO + Unsloth) on a free T4 |
-| **Colab launch link** | [Open in Colab](https://colab.research.google.com/github/rhine-pereira/meta-hack-finale/blob/main/colab/training.ipynb) |
+| **Training Colab notebook** | [Open in Colab](https://colab.research.google.com/drive/19MRrUvKXv-xpa_kBKqwLbGY3ACJNYLxm?usp=sharing) — end-to-end (TRL GRPO) on a free T4 |
+| **Colab launch link** | [Open in Colab](https://colab.research.google.com/drive/19MRrUvKXv-xpa_kBKqwLbGY3ACJNYLxm?usp=sharing) |
 | **Standalone training script** | [`train_colab.py`](train_colab.py) (Colab-first), [`train.py`](train.py) (local-first) |
 | **Mini-blog (publishable)** | [`submission/hf_mini_blog.md`](submission/hf_mini_blog.md) |
 | **Demo script (≤2 min)** | [`submission/demo_video_script.md`](submission/demo_video_script.md) |
