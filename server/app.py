@@ -256,13 +256,32 @@ def get_daily_briefing(episode_id: str, agent_role: str) -> dict:
         for c in state.personal_crises if not c.resolved and c.target_role == role_enum
     ]
     
+    # Ghost Founder context: tell the AI which roles are currently
+    # human-controlled and surface the most recent human ghost actions
+    # so the AI can adapt its decisions to a heterodox co-founder.
+    controllers = dict(getattr(state, "role_controllers", {}))
+    human_roles = [r for r, c in controllers.items() if c == "human"]
+    recent_human_actions = list(getattr(state, "human_action_log", []))[-10:]
+    ghost_note = None
+    if human_roles:
+        ghost_note = (
+            "Heads up: a human ghost-founder currently controls "
+            + ", ".join(r.upper() for r in human_roles)
+            + ". Their decision style may diverge from yours — read their recent "
+            "actions and adapt rather than assume."
+        )
+
     return {
         "day": state.day,
         "world_events": events,
         "role_observation": observation,
         "active_crises": active_crises,
         "reward": score.total,
-        "is_done": state.is_done()
+        "is_done": state.is_done(),
+        "role_controllers": controllers,
+        "human_roles": human_roles,
+        "recent_human_actions": recent_human_actions,
+        "ghost_founder_note": ghost_note,
     }
 
 # ── Task 4: Decisions & Interactions ─────────────────────────────────────────
@@ -1606,6 +1625,136 @@ def get_resurrection_report(episode_id: str) -> dict:
 
     report = generate_resurrection_report(state, scenario)
     return report
+
+# ── USP 2: Ghost Founder (Human-in-the-Loop Takeover) ───────────────────────
+
+_VALID_CONTROLLERS = {"ai", "human"}
+_VALID_ROLES = {"ceo", "cto", "sales", "people", "cfo"}
+
+
+def _ensure_role_controllers(state: WorldState) -> dict:
+    """Backfill role_controllers on legacy sessions that predate the field."""
+    if not getattr(state, "role_controllers", None):
+        state.role_controllers = {r: "ai" for r in _VALID_ROLES}
+    if not hasattr(state, "human_action_log") or state.human_action_log is None:
+        state.human_action_log = []
+    return state.role_controllers
+
+
+@mcp.tool()
+def set_role_controller(episode_id: str, role: str, controller: str) -> dict:
+    """
+    Take or release human control of one of the five co-founder roles.
+
+    While a role is set to 'human', the training/inference loop should
+    skip auto tool calls for that role. The frontend "Ghost Founder"
+    console drives that role on the human's behalf instead.
+
+    Args:
+        episode_id: Session identifier.
+        role: ceo, cto, sales, people, or cfo.
+        controller: 'human' to take control, 'ai' to release.
+    """
+    role = role.lower().strip()
+    controller = controller.lower().strip()
+    if role not in _VALID_ROLES:
+        return {"error": f"Unknown role '{role}'."}
+    if controller not in _VALID_CONTROLLERS:
+        return {"error": f"controller must be one of {_VALID_CONTROLLERS}."}
+
+    state = _get_state(episode_id)
+    controllers = _ensure_role_controllers(state)
+    previous = controllers.get(role, "ai")
+    controllers[role] = controller
+
+    state.human_action_log.append({
+        "day": state.day,
+        "role": role,
+        "action": "take_control" if controller == "human" else "release_control",
+        "details": {"previous": previous, "controller": controller},
+    })
+
+    save_sessions()
+
+    return {
+        "role": role,
+        "controller": controller,
+        "previous_controller": previous,
+        "role_controllers": dict(controllers),
+        "day": state.day,
+        "message": (
+            f"Ghost-founder is now driving {role.upper()}."
+            if controller == "human"
+            else f"AI has resumed control of {role.upper()}."
+        ),
+    }
+
+
+@mcp.tool()
+def get_role_controllers(episode_id: str) -> dict:
+    """
+    Inspect which roles are currently AI-driven vs human-driven, plus a
+    rolling tail of human ghost-founder actions taken this episode.
+
+    Args:
+        episode_id: Session identifier.
+    """
+    state = _get_state(episode_id)
+    controllers = _ensure_role_controllers(state)
+    return {
+        "day": state.day,
+        "role_controllers": dict(controllers),
+        "human_roles": [r for r, c in controllers.items() if c == "human"],
+        "human_action_log": list(state.human_action_log[-25:]),
+        "human_action_count": len(state.human_action_log),
+    }
+
+
+@mcp.tool()
+def log_human_action(episode_id: str, role: str, action: str, details: str = "") -> dict:
+    """
+    Record an action taken by the human ghost-founder. The frontend calls
+    this on every decision (build feature, send message, hire, negotiate,
+    handle crisis, etc.) so the AI co-founders can see what the human did
+    and adapt at the next briefing.
+
+    Args:
+        episode_id: Session identifier.
+        role: The role the human is currently driving.
+        action: Short label, e.g. 'build_feature', 'pivot_company', 'send_message'.
+        details: Optional free-form details (string-serialisable).
+    """
+    role = role.lower().strip()
+    if role not in _VALID_ROLES:
+        return {"error": f"Unknown role '{role}'."}
+
+    state = _get_state(episode_id)
+    _ensure_role_controllers(state)
+
+    if state.role_controllers.get(role) != "human":
+        # Allow logging anyway but flag — useful for debugging.
+        warning = (
+            f"Note: {role} is currently AI-controlled; logging anyway."
+        )
+    else:
+        warning = None
+
+    entry = {
+        "day": state.day,
+        "role": role,
+        "action": action,
+        "details": details if isinstance(details, str) else str(details),
+    }
+    state.human_action_log.append(entry)
+    save_sessions()
+
+    return {
+        "logged": True,
+        "entry": entry,
+        "human_action_count": len(state.human_action_log),
+        "warning": warning,
+    }
+
 
 # ── ASGI Bridge ─────────────────────────────────────────────────────────────
 # This allows openenv.yaml (server.app:app) to work

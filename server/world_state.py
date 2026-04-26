@@ -211,6 +211,18 @@ class WorldState:
     postmortem_triggered_forks: list[dict] = field(default_factory=list)
     ai_decisions_at_forks: list[dict] = field(default_factory=list)
 
+    # ── Ghost Founder (Human-in-the-Loop) ────────────────────────────
+    # Maps role name (ceo/cto/sales/people/cfo) -> "ai" or "human".
+    # When a role flips to "human", the AI training/inference loop is
+    # expected to skip auto-tool-calls for that role, while still seeing
+    # an updated briefing that reflects the human's actions.
+    role_controllers: dict[str, str] = field(default_factory=lambda: {
+        "ceo": "ai", "cto": "ai", "sales": "ai", "people": "ai", "cfo": "ai"
+    })
+    # Append-only journal of human ghost-founder actions. AI peers consult
+    # this so they can adapt to a different decision pattern.
+    human_action_log: list[dict] = field(default_factory=list)
+
     def runway_days(self) -> float:
         daily_revenue = self.mrr / 30.0
         net_burn = self.burn_rate_daily - daily_revenue
