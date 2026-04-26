@@ -3,8 +3,8 @@ GENESIS MCP Server — The main entry point.
 Exposes tools to LLM agents for co-founding and operating a startup.
 """
 
-import os
 import json
+import os
 import pickle
 import random
 import uuid
@@ -1380,15 +1380,34 @@ async def commit_simulation_proof(episode_id: str, dry_run: bool = False) -> dic
     
     if dry_run:
         episode_fingerprint = client.get_episode_fingerprint(state.episode_id, state.seed)
-        pda = client.derive_checkpoint_pda(episode_fingerprint, state.last_checkpoint_index)
+        # Derive PDA when the Solana SDK is available; otherwise return a
+        # clear, non-fatal payload so the dry-run still proves we have a valid
+        # Merkle root and the env is wired up correctly.
+        pda_str: str
+        try:
+            pda_str = str(client.derive_checkpoint_pda(
+                episode_fingerprint, state.last_checkpoint_index
+            ))
+            pda_available = True
+        except RuntimeError as exc:
+            pda_str = f"<unavailable: {exc}>"
+            pda_available = False
         return {
             "success": True,
             "dry_run": True,
             "merkle_root_hex": merkle_root.hex(),
+            "episode_fingerprint_hex": episode_fingerprint.hex(),
             "leaf_count": len(state.proof_leaves),
             "checkpoint_index": state.last_checkpoint_index,
-            "pda": str(pda),
-            "day": state.day
+            "pda": pda_str,
+            "pda_available": pda_available,
+            "solana_sdk_available": client.is_configured() or pda_available,
+            "day": state.day,
+            "message": (
+                "Dry-run successful: Merkle root computed locally."
+                if not pda_available
+                else "Dry-run successful: Merkle root + on-chain PDA derived."
+            ),
         }
     
     # Execute on-chain commit
