@@ -11,7 +11,10 @@ import {
   GameEvent,
   FounderGenome,
   GenomeExport,
-  ComparisonExport
+  ComparisonExport,
+  AgentRoleId,
+  RoleController,
+  HumanActionEntry
 } from "@/types/genesis";
 import { genesisClient } from "./genesis-client";
 
@@ -82,6 +85,12 @@ interface GenesisStore {
   genomeExports: Record<string, GenomeExport>;
   comparison: ComparisonExport | null;
 
+  // Ghost Founder (USP 2 — Human-in-the-Loop Takeover)
+  roleControllers: Record<AgentRoleId, RoleController>;
+  ghostActiveRole: AgentRoleId | null;       // role whose console is open
+  humanActionLog: HumanActionEntry[];
+  ghostBriefings: Partial<Record<AgentRoleId, any>>;
+
   // Actions
   setServerOnline: (online: boolean) => void;
   reset: (difficulty: number, seed: number, modelId?: string) => Promise<void>;
@@ -103,6 +112,22 @@ interface GenesisStore {
   handleCrisis: (crisisId: string, response: string) => Promise<void>;
   injectMemory: (key: string, value: string) => Promise<void>;
   
+  // Ghost Founder Actions
+  takeControl: (role: AgentRoleId) => Promise<void>;
+  releaseControl: (role: AgentRoleId) => Promise<void>;
+  openGhostConsole: (role: AgentRoleId) => void;
+  closeGhostConsole: () => void;
+  fetchGhostBriefing: (role: AgentRoleId) => Promise<any>;
+  refreshControllers: () => Promise<void>;
+  ghostMakeDecision: (role: AgentRoleId, decisionType: string, decision: string, reasoning: string) => Promise<void>;
+  ghostSendMessage: (fromRole: AgentRoleId, toRole: AgentRoleId, subject: string, content: string) => Promise<void>;
+  ghostHandleCrisis: (role: AgentRoleId, crisisId: string, response: string) => Promise<void>;
+  ghostBuildFeature: (name: string, complexity: string, engineers: number) => Promise<void>;
+  ghostHire: (candidateId: string, role: string, salary: number) => Promise<void>;
+  ghostNegotiate: (investorId: string, valuation: number, equity: number) => Promise<void>;
+  ghostAnalyzeMarket: (segment: string) => Promise<void>;
+  ghostPivot: (newDirection: string, rationale: string, vote: string) => Promise<void>;
+
   // Helpers
   runwayDays: () => number;
 }
@@ -160,6 +185,11 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
   genomeExports: {},
   comparison: null,
 
+  roleControllers: { ceo: "ai", cto: "ai", sales: "ai", people: "ai", cfo: "ai" },
+  ghostActiveRole: null,
+  humanActionLog: [],
+  ghostBriefings: {},
+
   // Actions
   setServerOnline: (online) => set({ serverOnline: online }),
 
@@ -189,6 +219,13 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       await get().fetchState();
       await get().fetchReward();
       await get().fetchProofStatus();
+      set({
+        roleControllers: { ceo: "ai", cto: "ai", sales: "ai", people: "ai", cfo: "ai" },
+        ghostActiveRole: null,
+        humanActionLog: [],
+        ghostBriefings: {},
+      });
+      await get().refreshControllers();
     } catch (error) {
       console.error("Reset failed:", error);
     }
@@ -222,6 +259,7 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       await get().fetchState();
       await get().fetchReward();
       await get().fetchProofStatus();
+      await get().refreshControllers();
     } catch (error) {
       console.error("Advance day failed:", error);
     }
@@ -448,6 +486,277 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       await get().fetchState();
     } catch (error) {
       console.error("Inject memory failed:", error);
+    }
+  },
+
+  takeControl: async (role) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      const result = await genesisClient.callTool("set_role_controller", {
+        episode_id: episodeId,
+        role,
+        controller: "human",
+      });
+      if (result?.role_controllers) {
+        set({ roleControllers: result.role_controllers, ghostActiveRole: role });
+      }
+      await get().fetchGhostBriefing(role);
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Take control failed:", error);
+    }
+  },
+
+  releaseControl: async (role) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      const result = await genesisClient.callTool("set_role_controller", {
+        episode_id: episodeId,
+        role,
+        controller: "ai",
+      });
+      if (result?.role_controllers) {
+        set({ roleControllers: result.role_controllers });
+      }
+      const { ghostActiveRole } = get();
+      if (ghostActiveRole === role) set({ ghostActiveRole: null });
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Release control failed:", error);
+    }
+  },
+
+  openGhostConsole: (role) => {
+    set({ ghostActiveRole: role });
+    get().fetchGhostBriefing(role).catch(() => {});
+  },
+
+  closeGhostConsole: () => set({ ghostActiveRole: null }),
+
+  fetchGhostBriefing: async (role) => {
+    const { episodeId } = get();
+    if (!episodeId) return null;
+    try {
+      const view = await genesisClient.callTool("get_company_state", {
+        episode_id: episodeId,
+        agent_role: role,
+      });
+      set((state) => ({ ghostBriefings: { ...state.ghostBriefings, [role]: view } }));
+      return view;
+    } catch (error) {
+      console.error("Fetch ghost briefing failed:", error);
+      return null;
+    }
+  },
+
+  refreshControllers: async () => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      const result = await genesisClient.callTool("get_role_controllers", {
+        episode_id: episodeId,
+      });
+      set({
+        roleControllers: result.role_controllers ?? get().roleControllers,
+        humanActionLog: result.human_action_log ?? get().humanActionLog,
+      });
+    } catch (error) {
+      console.error("Refresh controllers failed:", error);
+    }
+  },
+
+  ghostMakeDecision: async (role, decisionType, decision, reasoning) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("make_decision", {
+        episode_id: episodeId,
+        agent_role: role,
+        decision_type: decisionType,
+        decision,
+        reasoning,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role,
+        action: "make_decision",
+        details: `${decisionType}: ${decision}`,
+      });
+      await get().fetchState();
+      await get().fetchGhostBriefing(role);
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost make decision failed:", error);
+    }
+  },
+
+  ghostSendMessage: async (fromRole, toRole, subject, content) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("send_message", {
+        episode_id: episodeId,
+        from_role: fromRole,
+        to_role: toRole,
+        subject,
+        content,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role: fromRole,
+        action: "send_message",
+        details: `to ${toRole}: ${subject}`,
+      });
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost send message failed:", error);
+    }
+  },
+
+  ghostHandleCrisis: async (role, crisisId, response) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("handle_personal_crisis", {
+        episode_id: episodeId,
+        agent_role: role,
+        crisis_id: crisisId,
+        response,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role,
+        action: "handle_crisis",
+        details: `${crisisId}: ${response.substring(0, 80)}`,
+      });
+      await get().fetchState();
+      await get().fetchGhostBriefing(role);
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost handle crisis failed:", error);
+    }
+  },
+
+  ghostBuildFeature: async (name, complexity, engineers) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("build_feature", {
+        episode_id: episodeId,
+        agent_role: "cto",
+        name,
+        complexity,
+        engineers,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role: "cto",
+        action: "build_feature",
+        details: `${name} [${complexity}, ${engineers} eng]`,
+      });
+      await get().fetchState();
+      await get().fetchGhostBriefing("cto");
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost build feature failed:", error);
+    }
+  },
+
+  ghostHire: async (candidateId, role, salary) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("hire_candidate", {
+        episode_id: episodeId,
+        agent_role: "people",
+        candidate_id: candidateId,
+        role,
+        salary,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role: "people",
+        action: "hire_candidate",
+        details: `${role} @ $${salary}`,
+      });
+      await get().fetchState();
+      await get().fetchGhostBriefing("people");
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost hire failed:", error);
+    }
+  },
+
+  ghostNegotiate: async (investorId, valuation, equity) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("negotiate_with_investor", {
+        episode_id: episodeId,
+        agent_role: "cfo",
+        investor_id: investorId,
+        valuation,
+        equity,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role: "cfo",
+        action: "negotiate_with_investor",
+        details: `${investorId} val=$${valuation} eq=${(equity * 100).toFixed(1)}%`,
+      });
+      await get().fetchState();
+      await get().fetchGhostBriefing("cfo");
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost negotiate failed:", error);
+    }
+  },
+
+  ghostAnalyzeMarket: async (segment) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("analyze_market", {
+        episode_id: episodeId,
+        agent_role: "ceo",
+        segment,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role: "ceo",
+        action: "analyze_market",
+        details: segment,
+      });
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost analyze market failed:", error);
+    }
+  },
+
+  ghostPivot: async (newDirection, rationale, vote) => {
+    const { episodeId, ghostActiveRole } = get();
+    if (!episodeId) return;
+    const role = ghostActiveRole ?? "ceo";
+    try {
+      await genesisClient.callTool("pivot_company", {
+        episode_id: episodeId,
+        agent_role: role,
+        new_direction: newDirection,
+        rationale,
+        vote,
+      });
+      await genesisClient.callTool("log_human_action", {
+        episode_id: episodeId,
+        role,
+        action: "pivot_company",
+        details: `${vote}: ${newDirection}`,
+      });
+      await get().fetchState();
+      await get().refreshControllers();
+    } catch (error) {
+      console.error("Ghost pivot failed:", error);
     }
   },
 
