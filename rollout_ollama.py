@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Dict, Optional, Tuple
 
 import requests
+from requests.exceptions import ReadTimeout, ConnectionError as RequestsConnectionError
 
 
 def _safe_json_obj(text: str) -> Optional[Dict[str, Any]]:
@@ -63,26 +64,49 @@ def ollama_generate(
     prompt: str,
     temperature: float = 0.7,
     top_p: float = 0.95,
+    timeout_s: int = 300,
+    max_tokens: Optional[int] = 256,
+    num_ctx: Optional[int] = 4096,
+    retries: int = 2,
 ) -> str:
     """
     Calls Ollama HTTP API (/api/generate). Uses non-streaming for simplicity.
     """
-    resp = requests.post(
-        f"{base_url}/api/generate",
-        json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": temperature,
-                "top_p": top_p,
-            },
-        },
-        timeout=300,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    return (data.get("response") or "").strip()
+    url = f"{base_url}/api/generate"
+
+    # Retry strategy: first try normal; if it times out, retry with shorter output.
+    last_err: Optional[Exception] = None
+    for attempt in range(retries + 1):
+        effective_max = max_tokens
+        effective_timeout = timeout_s
+        if attempt >= 1:
+            # Make retries more likely to return quickly
+            effective_timeout = max(timeout_s, 900)
+            if effective_max is None:
+                effective_max = 128
+            else:
+                effective_max = max(64, int(effective_max * 0.6))
+
+        options: Dict[str, Any] = {"temperature": temperature, "top_p": top_p}
+        if effective_max is not None:
+            options["num_predict"] = int(effective_max)
+        if num_ctx is not None:
+            options["num_ctx"] = int(num_ctx)
+
+        try:
+            resp = requests.post(
+                url,
+                json={"model": model, "prompt": prompt, "stream": False, "options": options},
+                timeout=effective_timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return (data.get("response") or "").strip()
+        except (ReadTimeout, RequestsConnectionError, requests.HTTPError) as e:
+            last_err = e
+            time.sleep(1.0 + attempt * 0.5)
+
+    raise last_err if last_err else RuntimeError("Ollama request failed with unknown error")
 
 
 def main():
@@ -95,6 +119,10 @@ def main():
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--seed-start", type=int, default=2000)
+    parser.add_argument("--ollama-timeout", type=int, default=900, help="HTTP timeout per generation (seconds).")
+    parser.add_argument("--ollama-retries", type=int, default=2, help="Retries on timeout/connection errors.")
+    parser.add_argument("--max-tokens", type=int, default=256, help="Max tokens to generate per day.")
+    parser.add_argument("--num-ctx", type=int, default=4096, help="Context window sent to Ollama.")
     parser.add_argument("--export-genome", action="store_true")
     args = parser.parse_args()
 
@@ -127,7 +155,15 @@ def main():
                     break
 
                 prompt = _build_ceo_prompt(briefing)
-                completion = ollama_generate(args.ollama_url, args.ollama_model, prompt)
+                completion = ollama_generate(
+                    args.ollama_url,
+                    args.ollama_model,
+                    prompt,
+                    timeout_s=args.ollama_timeout,
+                    retries=args.ollama_retries,
+                    max_tokens=args.max_tokens,
+                    num_ctx=args.num_ctx,
+                )
                 parsed = _safe_json_obj(completion) or {}
 
                 decision_type = str(parsed.get("decision_type") or "tactical").lower()

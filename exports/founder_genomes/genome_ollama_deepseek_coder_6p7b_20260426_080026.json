@@ -1,0 +1,31 @@
+{
+  "profile": {
+    "company_valuation": 0.153,
+    "series_a_success": 0.0,
+    "runway_management": 0.381,
+    "product_velocity": 0.2,
+    "customer_retention": 0.567,
+    "team_morale": 0.776,
+    "cofounder_alignment": 0.805,
+    "personal_crisis_handling": 0.5,
+    "decision_coherence": 0.88,
+    "company_brain_quality": 0.903,
+    "pivot_execution": 0.5
+  },
+  "metadata": {
+    "episode_count": 30,
+    "avg_difficulty": 1.0,
+    "avg_days_survived": 30.0,
+    "strengths": [
+      "Brain",
+      "Coherence",
+      "Alignment"
+    ],
+    "weaknesses": [
+      "Velocity",
+      "Valuation",
+      "Series A"
+    ],
+    "timestamp": "2026-04-26T08:00:26.167513"
+  }
+}

@@ -193,8 +193,9 @@ parser.add_argument("--fast", action="store_true",
 args, _ = parser.parse_known_args()
 
 if args.fast:
-    if args.num_generations > 1:
-        args.num_generations = 1
+    # GRPO requires >=2 generations per prompt (advantage calculation).
+    if args.num_generations != 2:
+        args.num_generations = 2
     if args.max_completion_length > 96:
         args.max_completion_length = 96
     if args.dataset_multiplier > 8:

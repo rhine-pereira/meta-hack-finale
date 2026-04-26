@@ -1,11 +1,27 @@
 {
-  "mode": "representative_run_seed_42",
-  "note": "Generated from seeded simulation; real Colab run produces similar trajectory.",
-  "num_baseline_episodes": 6,
-  "num_trained_episodes": 12,
-  "baseline_avg_final_reward": 0.3241,
-  "trained_avg_final_reward": 0.5696,
-  "improvement_pct": 75.78,
-  "best_trained_reward": 0.7139,
-  "worst_baseline_reward": 0.1955
+  "num_sessions_with_history": 70,
+  "avg_final_reward": 0.451,
+  "best_final_reward": 0.5022,
+  "worst_final_reward": 0.2875,
+  "improvement_over_baseline": null,
+  "by_model_id": {
+    "ollama_mistral_latest": {
+      "num_sessions": 31,
+      "avg_final_reward": 0.4707,
+      "best_final_reward": 0.5022,
+      "worst_final_reward": 0.4278
+    },
+    "ollama_deepseek_coder_6p7b": {
+      "num_sessions": 30,
+      "avg_final_reward": 0.4604,
+      "best_final_reward": 0.4911,
+      "worst_final_reward": 0.4178
+    },
+    "unknown": {
+      "num_sessions": 9,
+      "avg_final_reward": 0.3519,
+      "best_final_reward": 0.463,
+      "worst_final_reward": 0.2875
+    }
+  }
 }
