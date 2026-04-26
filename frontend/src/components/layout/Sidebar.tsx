@@ -15,7 +15,8 @@ import {
   History,
   Activity,
   TrendingUp,
-  Skull
+  Skull,
+  Radio
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
@@ -30,6 +31,7 @@ export const Sidebar = () => {
       label: "Command Hub",
       links: [
         { label: "Mission Control", href: "/", icon: LayoutDashboard },
+        { label: "Live Demo", href: "/demo", icon: Radio, color: "text-accent animate-pulse" },
         { label: "Incident Control", href: "/crises", icon: ShieldAlert, color: "text-signal-red" },
       ]
     },

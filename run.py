@@ -47,6 +47,7 @@ import json
 import os
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -110,9 +111,11 @@ def banner(text: str) -> None:
 
 def step(text: str) -> None:
     print(f"{C.CYAN}{_ARROW} {C.BOLD}{text}{C.RESET}")
+    time.sleep(0.8)
 
 def ok(text: str) -> None:
     print(f"  {C.GREEN}{_OK}{C.RESET} {text}")
+    time.sleep(0.5)
 
 def warn(text: str) -> None:
     print(f"  {C.YELLOW}!{C.RESET} {text}")
@@ -122,6 +125,35 @@ def err(text: str) -> None:
 
 def info(text: str) -> None:
     print(f"  {C.DIM}{text}{C.RESET}")
+
+
+# ── demo event pushing ──────────────────────────────────────────────────────
+
+_DEMO_BACKEND_PORT = 7860
+
+def _push_demo_event(phase: int, phase_title: str, step: str, detail: str = "", status: str = "info", data: dict = None):
+    """Push a structured event to the backend's /demo/log endpoint."""
+    url = f"http://127.0.0.1:{_DEMO_BACKEND_PORT}/demo/log"
+    payload = {
+        "phase": phase,
+        "phase_title": phase_title,
+        "step": step,
+        "detail": detail,
+        "status": status,
+        "data": data or {}
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=1) as resp:
+            pass
+    except Exception:
+        # Fire and forget: don't let log failures break the demo
+        pass
 
 
 # ── child-process registry ──────────────────────────────────────────────────
@@ -268,10 +300,30 @@ def install_frontend_deps() -> bool:
 
 # ── phase 2: backend ────────────────────────────────────────────────────────
 
-def _wait_for_health(url: str, timeout_s: float = 60.0) -> bool:
+def _port_is_free(host: str, port: int) -> bool:
+    """Best-effort check if we can bind to (host, port)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+def _pick_free_port(start_port: int, *, host: str = "127.0.0.1", max_tries: int = 40) -> int:
+    """Choose a free port, scanning upward from start_port."""
+    for p in range(start_port, start_port + max_tries):
+        if _port_is_free(host, p):
+            return p
+    raise RuntimeError(f"No free ports found in range [{start_port}, {start_port + max_tries - 1}] on {host}")
+
+def _wait_for_health(url: str, timeout_s: float = 60.0, *, proc: Optional[subprocess.Popen] = None) -> bool:
     start = time.time()
     last_err: Optional[str] = None
     while time.time() - start < timeout_s:
+        if proc is not None and proc.poll() is not None:
+            err(f"Backend process exited early (pid={proc.pid}, code={proc.returncode}).")
+            return False
         try:
             with urllib.request.urlopen(url, timeout=2) as resp:
                 if resp.status == 200:
@@ -282,8 +334,13 @@ def _wait_for_health(url: str, timeout_s: float = 60.0) -> bool:
     err(f"Backend did not become healthy within {timeout_s:.0f}s ({last_err}).")
     return False
 
-def start_backend(port: int) -> subprocess.Popen:
+def start_backend(requested_port: int) -> tuple[subprocess.Popen, int]:
     banner("Phase 2 — Backend (FastMCP / FastAPI)")
+    port = requested_port
+    if not _port_is_free("127.0.0.1", port):
+        new_port = _pick_free_port(port + 1)
+        warn(f"Port {port} is already in use. Switching backend to port {new_port}.")
+        port = new_port
     step(f"Launching uvicorn on http://127.0.0.1:{port}")
     env = os.environ.copy()
     # Force matplotlib's non-interactive backend so genome/comparison chart
@@ -295,11 +352,11 @@ def start_backend(port: int) -> subprocess.Popen:
         cwd=ROOT, env=env, label="backend",
     )
     ok("uvicorn process started; waiting for /health …")
-    if _wait_for_health(f"http://127.0.0.1:{port}/health", timeout_s=60):
+    if _wait_for_health(f"http://127.0.0.1:{port}/health", timeout_s=60, proc=proc):
         ok("Backend is healthy.")
     else:
         err("Backend health check failed. Check the uvicorn logs above.")
-    return proc
+    return proc, port
 
 
 # ── phase 3: frontend ───────────────────────────────────────────────────────
@@ -409,6 +466,7 @@ def _first_entity(collection, id_key: str = "id"):
 def _scene(title: str) -> None:
     bar = "─" if _UNICODE_OK else "-"
     print(f"\n{C.MAGENTA}{bar * 4} {C.BOLD}{title}{C.RESET}{C.MAGENTA} {bar * (max(0, 70 - len(title)))}{C.RESET}")
+    time.sleep(1.5)
 
 
 def run_demo(backend_port: int, *, episodes: int, difficulty: int,
@@ -433,7 +491,11 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
      13. Blockchain proofs   (Merkle status + dry-run on-chain commit)
      14. Final reward        (composite breakdown)
     """
+    global _DEMO_BACKEND_PORT
+    _DEMO_BACKEND_PORT = backend_port
+
     banner("Phase 4 — Full feature demo")
+    _push_demo_event(4, "Full Feature Demo", "demo_start", "Starting scripted rollout tour", "info")
     base_url = f"http://127.0.0.1:{backend_port}"
 
     try:
@@ -460,6 +522,7 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
     try:
         # ── 1. Session setup ────────────────────────────────────────────────
         _scene("1/14  Session setup")
+        _push_demo_event(4, "Session Setup", "1/14 Session setup", "Initializing MCP session", "info")
         step(f"reset(episode={primary_id}, difficulty={difficulty}, model={model_id})")
         reset_resp = _safe_call(
             env, "reset",
@@ -470,60 +533,78 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             info(_short(reset_resp))
             ok(f"Day {reset_resp.get('day')}, cash={reset_resp.get('cash')}, "
                f"max_days={reset_resp.get('max_days')}, mode={reset_resp.get('difficulty')}")
+            _push_demo_event(4, "Session Setup", "reset", f"Day {reset_resp.get('day')}, cash=${reset_resp.get('cash')}", "ok", reset_resp)
 
         step("list_tools — full MCP tool surface")
+        _push_demo_event(4, "Session Setup", "list_tools", "Discovering available MCP tools", "info")
         try:
             tools = env.list_tools()
             ok(f"{len(tools)} tools registered.")
             preview = ", ".join(t.name for t in tools[:8])
             info(f"first 8: {preview} ...")
+            _push_demo_event(4, "Session Setup", "list_tools", f"{len(tools)} tools registered", "ok")
         except Exception as e:
             warn(f"list_tools failed: {e}")
+            _push_demo_event(4, "Session Setup", "list_tools", str(e), "warn")
 
         step("get_company_state — role-filtered observation per role")
+        _push_demo_event(4, "Session Setup", "get_company_state", "Verifying role-filtered views", "info")
         for r in roles:
             snap = _safe_call(env, "get_company_state", episode_id=primary_id, agent_role=r)
             if isinstance(snap, dict):
                 keys = sorted(snap.keys())
                 ok(f"{r.upper():<6} → {len(keys)} keys: {', '.join(keys[:6])}{'...' if len(keys) > 6 else ''}")
+                _push_demo_event(4, "Session Setup", f"get_company_state ({r})", f"{len(keys)} keys visible", "ok")
 
         # ── 2. Product engineering (CTO) ────────────────────────────────────
         _scene("2/14  Product engineering (CTO tools)")
+        _push_demo_event(4, "Product Engineering", "2/14 Product Engineering", "CTO domain tools", "info")
         for feat_name, complexity, engineers in [
             ("core-api-v2",    "medium", 2),
             ("billing-portal", "low",    1),
             ("ml-recommender", "high",   3),
         ]:
             step(f"build_feature {feat_name} ({complexity})")
+            _push_demo_event(4, "Product Engineering", "build_feature", f"{feat_name} ({complexity})", "info")
             res = _safe_call(
                 env, "build_feature",
                 _args={"name": feat_name},
                 episode_id=primary_id, agent_role="cto",
                 complexity=complexity, engineers=engineers,
             )
-            if res: info(_short(res))
+            if res: 
+                info(_short(res))
+                _push_demo_event(4, "Product Engineering", "build_feature", f"ETA: {res.get('eta_days')} days", "ok", res)
 
         step("run_load_test — peak-hour simulation")
         res = _safe_call(env, "run_load_test", episode_id=primary_id, agent_role="cto",
                          scenario="Black-Friday traffic burst — 8x normal RPS")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Product Engineering", "run_load_test", f"Max RPS: {res.get('max_rps')}", "ok", res)
 
         step("review_codebase_health")
         res = _safe_call(env, "review_codebase_health", episode_id=primary_id, agent_role="cto")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Product Engineering", "review_codebase_health", f"Tech Debt: {res.get('tech_debt_score')}", "ok", res)
 
         step("deploy_to_production v0.9.0")
         res = _safe_call(env, "deploy_to_production", episode_id=primary_id, agent_role="cto", version="0.9.0")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Product Engineering", "deploy_to_production", f"Success: {res.get('success')}", "ok" if res.get('success') else "warn", res)
 
         # ── 3. Sales & market ───────────────────────────────────────────────
         _scene("3/14  Sales & market intelligence")
+        _push_demo_event(4, "Sales & Market", "3/14 Sales & Market", "CEO/Sales domain tools", "info")
         step("analyze_market(segment=mid-market SaaS)")
         market = _safe_call(env, "analyze_market", episode_id=primary_id,
                             agent_role="ceo", segment="mid-market-saas")
         if isinstance(market, dict):
             info(f"TAM={market.get('tam')}, growth={market.get('market_growth')}, "
                  f"competitors={len(market.get('competitors', []))}")
+            _push_demo_event(4, "Sales & Market", "analyze_market", f"TAM: ${market.get('tam'):,}", "ok", market)
 
         comp_name = None
         if isinstance(market, dict):
@@ -535,7 +616,9 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             step(f"run_competitive_analysis({comp_name})")
             res = _safe_call(env, "run_competitive_analysis", episode_id=primary_id,
                              agent_role="ceo", competitor_name=comp_name)
-            if res: info(_short(res))
+            if res: 
+                info(_short(res))
+                _push_demo_event(4, "Sales & Market", "run_competitive_analysis", f"Target: {comp_name}", "ok", res)
 
         sales_view = _safe_call(env, "get_company_state", episode_id=primary_id, agent_role="sales") or {}
         cust_id, _cust, cust_name = _first_entity(_unwrap(sales_view, "customers"))
@@ -548,20 +631,27 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                                  content=("Hi team — wanted to share what we shipped this quarter, "
                                           "and preview the analytics dashboard you asked for. "
                                           "Happy to jump on a call if useful."))
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "Sales & Market", "send_customer_email", f"Sent to {cust_name}", "ok", res)
                 step(f"update_crm({cust_name}, status=expanding)")
                 res = _safe_call(env, "update_crm", episode_id=primary_id, agent_role="sales",
                                  customer_id=cust_id, status="expanding",
                                  notes="Strong signal on multi-seat upgrade after roadmap call.")
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "Sales & Market", "update_crm", f"Status: expanding", "ok", res)
         else:
             warn("No customers visible — skipping customer-facing tools.")
 
         # ── 4. Finance (CFO) ────────────────────────────────────────────────
         _scene("4/14  Finance & fundraising (CFO tools)")
+        _push_demo_event(4, "Finance & Fundraising", "4/14 Finance & Fundraising", "CFO domain tools", "info")
         step("check_bank_balance")
         bank = _safe_call(env, "check_bank_balance", episode_id=primary_id, agent_role="cfo")
-        if bank: info(_short(bank))
+        if bank: 
+            info(_short(bank))
+            _push_demo_event(4, "Finance & Fundraising", "check_bank_balance", f"Cash: ${bank.get('cash'):,}", "ok", bank)
 
         step("create_financial_model(growth=15%/mo, 12mo)")
         res = _safe_call(env, "create_financial_model", episode_id=primary_id,
@@ -570,6 +660,7 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             info(f"breakeven_month={res.get('breakeven_month')}, "
                  f"runway={res.get('runway_at_current_burn')}d, "
                  f"projection_points={len(res.get('projections', []))}")
+            _push_demo_event(4, "Finance & Fundraising", "create_financial_model", f"Runway: {res.get('runway_at_current_burn')} days", "ok", res)
 
         cfo_view = _safe_call(env, "get_company_state", episode_id=primary_id, agent_role="ceo") or {}
         inv_id, _inv, inv_name = _first_entity(_unwrap(cfo_view, "investors"))
@@ -581,24 +672,31 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                                  content=("Q-end update: ARR up 22% MoM, NRR holding above 1.10, "
                                           "shipped 3 features incl. ML recommender. Cash position healthy. "
                                           "Asks: warm intros to mid-market sales advisors."))
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "Finance & Fundraising", "send_investor_update", f"Sent to {inv_name}", "ok", res)
 
                 step(f"negotiate_with_investor({inv_name}, $30M @ 15% equity)")
                 res = _safe_call(env, "negotiate_with_investor", episode_id=primary_id,
                                  agent_role="ceo", investor_id=inv_id,
                                  valuation=30_000_000, equity=0.15)
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "Finance & Fundraising", "negotiate_with_investor", f"Offer: $30M @ 15%", "ok", res)
         else:
             warn("No investors visible — skipping investor tools.")
 
         # ── 5. People & culture ─────────────────────────────────────────────
         _scene("5/14  People & culture (Head of People tools)")
+        _push_demo_event(4, "People & Culture", "5/14 People & Culture", "Head of People domain tools", "info")
         step("post_job_listing(Senior Backend Engineer)")
         res = _safe_call(env, "post_job_listing", episode_id=primary_id, agent_role="people",
                          role="Senior Backend Engineer",
                          requirements="5+ yrs Python, distributed systems, on-call willing.",
                          salary_min=140_000, salary_max=190_000)
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "People & Culture", "post_job_listing", f"Posted: Senior Backend Engineer", "ok", res)
 
         people_view = _safe_call(env, "get_company_state", episode_id=primary_id, agent_role="people") or {}
         cand_id, _cand, cand_name = _first_entity(_unwrap(people_view, "team", "candidate_pool"))
@@ -608,12 +706,16 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                 res = _safe_call(env, "conduct_interview", episode_id=primary_id, agent_role="people",
                                  candidate_id=cand_id,
                                  questions="System design + leadership + values fit.")
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "People & Culture", "conduct_interview", f"Interviewed {cand_name}", "ok", res)
 
                 step(f"hire_candidate({cand_name})")
                 res = _safe_call(env, "hire_candidate", episode_id=primary_id, agent_role="people",
                                  candidate_id=cand_id, role="Senior Backend Engineer", salary=160_000)
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "People & Culture", "hire_candidate", f"Hired {cand_name}", "ok", res)
 
         emp_id, _emp, emp_name = _first_entity(_unwrap(people_view, "team", "employees"))
         if emp_id:
@@ -624,36 +726,48 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                                  talking_points=("Career growth, current workload, blockers, "
                                                  "how the recent deploy stress affected you, "
                                                  "what you want to learn next quarter."))
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "People & Culture", "hold_one_on_one", f"Meeting with {emp_name}", "ok", res)
 
         step("check_team_morale")
         res = _safe_call(env, "check_team_morale", episode_id=primary_id, agent_role="people")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "People & Culture", "check_team_morale", f"Avg Morale: {res.get('team_avg_morale')}", "ok", res)
 
         # ── 6. Memory & messaging ───────────────────────────────────────────
-        _scene("6/14  Strategic memory & messaging")
+        _scene("6/14  Memory & messaging")
+        _push_demo_event(4, "Memory & Messaging", "6/14 Memory & Messaging", "CompanyBrain & cross-role comms", "info")
         step("write_company_brain(weekly_state_of_company)")
         res = _safe_call(env, "write_company_brain", episode_id=primary_id, agent_role="ceo",
                          key="weekly_state_of_company",
                          value=("Theme: convert mid-market pilots to multi-seat. "
                                 "Product: ML recommender in beta. Finance: 14mo runway. "
                                 "Risk: deploy stability after v0.9.0; CTO owns mitigation."))
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Memory & Messaging", "write_company_brain", "Stored weekly state", "ok", res)
 
         step("read_company_brain(weekly_state_of_company)")
         res = _safe_call(env, "read_company_brain", episode_id=primary_id, agent_role="cfo",
                          key="weekly_state_of_company")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Memory & Messaging", "read_company_brain", "CFO retrieved state", "ok", res)
 
         step("send_message ceo → cto")
         res = _safe_call(env, "send_message", episode_id=primary_id,
                          from_role="ceo", to_role="cto",
                          subject="Deploy stability target",
                          content="Let's hold v1.0 until uptime ≥ 99.5% over 7 days. Risk-adjusted launch.")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Memory & Messaging", "send_message", "CEO -> CTO: Deploy stability", "ok", res)
 
         # ── 7. Personal crises ──────────────────────────────────────────────
         _scene("7/14  Personal crisis handling")
+        _push_demo_event(4, "Personal Crises", "7/14 Personal Crises", "Handling co-founder burnout", "info")
         crisis_resolved = False
         for r in roles:
             briefing = _safe_call(env, "get_daily_briefing", episode_id=primary_id, agent_role=r)
@@ -663,36 +777,47 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                 if crisis.get("target_role") and crisis["target_role"] != r:
                     continue
                 step(f"handle_personal_crisis [{r}] {crisis.get('description', '')[:80]}")
+                _push_demo_event(4, "Personal Crises", "handle_personal_crisis", f"Role: {r}", "info", crisis)
                 res = _safe_call(env, "handle_personal_crisis", episode_id=primary_id,
                                  agent_role=r, crisis_id=crisis["id"],
                                  response=("I understand this matters and want to act in good faith. "
                                            "Plan: 1) acknowledge openly, 2) propose equity refresh + 2-week vacation, "
                                            "3) schedule talk with team to clarify next steps. "
                                            "I'll personally own follow-through and report back in 7 days."))
-                if res: info(_short(res))
+                if res: 
+                    info(_short(res))
+                    _push_demo_event(4, "Personal Crises", "handle_personal_crisis", "Crisis resolved", "ok", res)
                 crisis_resolved = True
                 break
             if crisis_resolved:
                 break
         if not crisis_resolved:
             info("No active crisis surfaced this tick — that's normal early in an episode.")
+            _push_demo_event(4, "Personal Crises", "handle_personal_crisis", "No active crisis", "info")
 
         # ── 8. Strategy & pivots ────────────────────────────────────────────
         _scene("8/14  Strategy & pivots")
+        _push_demo_event(4, "Strategy & Pivots", "8/14 Strategy & Pivots", "Strategic direction shift", "info")
         new_direction = "vertical-saas-for-fintech"
         rationale = "Mid-market signal is strongest in fintech ops; refocus to win that wedge."
         step(f"pivot_company propose [ceo] → {new_direction}")
+        _push_demo_event(4, "Strategy & Pivots", "pivot_company (propose)", f"New dir: {new_direction}", "info")
         res = _safe_call(env, "pivot_company", episode_id=primary_id, agent_role="ceo",
                          new_direction=new_direction, rationale=rationale, vote="approve")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Strategy & Pivots", "pivot_company (propose)", "Proposed by CEO", "ok", res)
         for voter in ("cto", "cfo"):
             step(f"pivot_company vote [{voter}] approve")
             res = _safe_call(env, "pivot_company", episode_id=primary_id, agent_role=voter,
                              new_direction=new_direction, rationale=rationale, vote="approve")
-            if res: info(_short(res))
+            if res: 
+                info(_short(res))
+                _push_demo_event(4, "Strategy & Pivots", f"pivot_company (vote {voter})", "Vote recorded", "ok", res)
 
         # ── 9. Time advancement ─────────────────────────────────────────────
         _scene(f"9/14  Time advancement — {episode_days} day(s) of briefings")
+        _push_demo_event(4, "Time Advancement", "9/14 Time Advancement", f"Advancing {episode_days} days", "info")
         for day in range(1, episode_days + 1):
             role = roles[day % len(roles)]
             briefing = _safe_call(env, "get_daily_briefing", episode_id=primary_id, agent_role=role)
@@ -702,11 +827,15 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                        reasoning="Demo loop — exercising daily decision logging.")
             if isinstance(briefing, dict) and briefing.get("is_done"):
                 info(f"episode finished early on day {day}")
+                _push_demo_event(4, "Time Advancement", "get_daily_briefing", f"Finished early on day {day}", "ok", briefing)
                 break
-        ok(f"Advanced through {episode_days} day-ticks.")
+            if day == episode_days:
+                ok(f"Advanced through {episode_days} day-ticks.")
+                _push_demo_event(4, "Time Advancement", "get_daily_briefing", f"Advanced {episode_days} days", "ok", briefing)
 
         # ── 10. USP-1 Resurrection Engine ──────────────────────────────────
         _scene("10/14  USP-1 Dead Startup Resurrection Engine")
+        _push_demo_event(4, "Resurrection Engine", "10/14 Resurrection Engine", "Replaying historical failures", "info")
         step("list_postmortem_scenarios")
         scenarios = _safe_call(env, "list_postmortem_scenarios")
         scenario_id = None
@@ -716,6 +845,7 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                      f"({s.get('year_founded', '?')}–{s.get('year_failed', '?')})")
             if scenarios.get("scenarios"):
                 scenario_id = scenarios["scenarios"][0].get("id")
+            _push_demo_event(4, "Resurrection Engine", "list_postmortem_scenarios", f"Found {len(scenarios.get('scenarios', []))} scenarios", "ok", scenarios)
 
         if scenario_id:
             res_id = f"resurrect-{scenario_id}-{uuid.uuid4().hex[:6]}"
@@ -726,8 +856,10 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             loaded = _safe_call(env, "load_postmortem_scenario", episode_id=res_id, scenario_id=scenario_id)
             if isinstance(loaded, dict):
                 ok(f"Loaded {loaded.get('company')} — {loaded.get('fork_points_loaded')} fork points.")
+                _push_demo_event(4, "Resurrection Engine", "load_postmortem_scenario", f"Loaded {loaded.get('company')}", "ok", loaded)
 
             step("Advancing 25 days to trigger fork-point crises")
+            _push_demo_event(4, "Resurrection Engine", "advance", "Triggering historical fork points", "info")
             for day in range(1, 26):
                 role = roles[day % len(roles)]
                 b = _safe_call(env, "get_daily_briefing", episode_id=res_id, agent_role=role)
@@ -737,6 +869,7 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                     if "[HISTORICAL FORK]" in c.get("description", ""):
                         target = c.get("target_role") or role
                         step(f"day {day} fork triggered → {target}")
+                        _push_demo_event(4, "Resurrection Engine", "fork_triggered", f"Day {day}: {c.get('description')[:50]}", "warn", c)
                         _safe_call(env, "handle_personal_crisis", episode_id=res_id,
                                    agent_role=target, crisis_id=c["id"],
                                    response=("I'd take the contrarian path: defer the marketing splurge, "
@@ -752,39 +885,51 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             report = _safe_call(env, "get_resurrection_report", episode_id=res_id)
             if isinstance(report, dict):
                 info(_short(report, limit=400))
+                _push_demo_event(4, "Resurrection Engine", "get_resurrection_report", "Report generated", "ok", report)
         else:
             warn("No scenarios available — skipping resurrection demo.")
 
         # ── 11. USP-2 Ghost Founder ────────────────────────────────────────
         _scene("11/14  USP-2 Ghost Founder (human-in-the-loop)")
+        _push_demo_event(4, "Ghost Founder", "11/14 Ghost Founder", "Human-in-the-loop takeover", "info")
         step("set_role_controller(ceo, human) — ghost takes over")
         res = _safe_call(env, "set_role_controller", episode_id=primary_id, role="ceo", controller="human")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Ghost Founder", "set_role_controller", "CEO -> Human", "ok", res)
         step("log_human_action — ghost makes a decision")
         res = _safe_call(env, "log_human_action", episode_id=primary_id, role="ceo",
                         action="strategic_call",
                         details="Ghost CEO chose to delay Series-A negotiation 30d to push valuation.")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Ghost Founder", "log_human_action", "Human decision logged", "ok", res)
         step("get_role_controllers")
         res = _safe_call(env, "get_role_controllers", episode_id=primary_id)
         if isinstance(res, dict):
             ok(f"Controllers: {res.get('role_controllers')}, "
                f"human_action_count={res.get('human_action_count')}")
+            _push_demo_event(4, "Ghost Founder", "get_role_controllers", f"Roles: {res.get('role_controllers')}", "ok", res)
         step("set_role_controller(ceo, ai) — release back to AI")
         res = _safe_call(env, "set_role_controller", episode_id=primary_id, role="ceo", controller="ai")
-        if res: info(_short(res))
+        if res: 
+            info(_short(res))
+            _push_demo_event(4, "Ghost Founder", "set_role_controller", "CEO -> AI", "ok", res)
 
         # ── 12. USP-3 Founder Genome ───────────────────────────────────────
         _scene("12/14  USP-3 Founder Genome (capability benchmark)")
+        _push_demo_event(4, "Founder Genome", "12/14 Founder Genome", "Capability benchmarking", "info")
         step(f"export_founder_genome({model_id})")
         res = _safe_call(env, "export_founder_genome", model_id=model_id)
         if isinstance(res, dict) and "artifacts" in res:
             ok(f"Genome JSON: {res['artifacts'].get('json')}")
             ok(f"Genome PNG : {res['artifacts'].get('png')}")
+            _push_demo_event(4, "Founder Genome", "export_founder_genome", f"Exported {model_id}", "ok", res)
         elif res:
             info(_short(res))
 
         step(f"Running short rival episode ({secondary_model}) so we can compare")
+        _push_demo_event(4, "Founder Genome", "rival_rollout", f"Rolling out {secondary_model}", "info")
         _safe_call(env, "reset", episode_id=secondary_id, difficulty=difficulty, seed=123,
                    model_id=secondary_model, model_provider="demo", model_version="run.py")
         for day in range(1, 11):
@@ -795,21 +940,25 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                        decision=f"Rival {role} day {day}: aggressive growth plays.",
                        reasoning="Rival profile — high risk / high velocity.")
         _safe_call(env, "export_founder_genome", model_id=secondary_model)
+        _push_demo_event(4, "Founder Genome", "export_founder_genome", f"Exported {secondary_model}", "ok")
 
         step("list_founder_genomes")
         listing = _safe_call(env, "list_founder_genomes")
         if isinstance(listing, dict):
             ok(f"Models with genomes: {listing.get('model_ids')}")
+            _push_demo_event(4, "Founder Genome", "list_founder_genomes", f"Models: {len(listing.get('model_ids', []))}", "ok", listing)
 
         step(f"compare_founder_genomes([{model_id}, {secondary_model}])")
         res = _safe_call(env, "compare_founder_genomes", model_ids=[model_id, secondary_model])
         if isinstance(res, dict) and "artifacts" in res:
             ok(f"Comparison PNG: {res['artifacts'].get('png')}")
+            _push_demo_event(4, "Founder Genome", "compare_founder_genomes", "Comparison chart generated", "ok", res)
         elif res:
             info(_short(res))
 
         # ── 13. Blockchain proofs ──────────────────────────────────────────
         _scene("13/14  Verifiable Simulation Proofs (blockchain layer)")
+        _push_demo_event(4, "Blockchain Proofs", "13/14 Blockchain Proofs", "Simulation integrity (Merkle/Solana)", "info")
         step("get_simulation_proof_status")
         res = _safe_call(env, "get_simulation_proof_status", episode_id=primary_id)
         if isinstance(res, dict):
@@ -818,6 +967,7 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                f"solana_configured={res.get('is_solana_configured')}")
             if res.get("explorer_url"):
                 info(f"explorer: {res['explorer_url']}")
+            _push_demo_event(4, "Blockchain Proofs", "get_simulation_proof_status", f"Leaves: {res.get('leaf_count')}", "ok", res)
 
         step("commit_simulation_proof(dry_run=True)")
         res = _safe_call(env, "commit_simulation_proof", episode_id=primary_id, dry_run=True)
@@ -830,9 +980,11 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
             else:
                 info("Solana SDK not installed — Merkle root verified locally only. "
                      "Install with `pip install solana solders base58` to enable on-chain PDAs.")
+            _push_demo_event(4, "Blockchain Proofs", "commit_simulation_proof", "Dry-run verified", "ok", res)
 
         # ── 14. Final reward ───────────────────────────────────────────────
         _scene("14/14  Final reward & breakdown")
+        _push_demo_event(4, "Final Reward", "14/14 Final Reward", "Demo completion & final scorecard", "info")
         reward = _safe_call(env, "get_reward", episode_id=primary_id)
         if isinstance(reward, dict):
             ok(f"day={reward.get('day')}  total reward={reward.get('reward'):.3f}  "
@@ -845,8 +997,10 @@ def run_demo(backend_port: int, *, episodes: int, difficulty: int,
                     print(f"    · {k:<28} {v}")
             if reward.get("weaknesses"):
                 info(f"MarketMaker weaknesses: {reward['weaknesses']}")
+            _push_demo_event(4, "Final Reward", "get_reward", f"Final Score: {reward.get('reward'):.3f}", "ok", reward)
 
         ok("Demo complete — every major feature exercised.")
+        _push_demo_event(4, "Final Reward", "demo_complete", "Full feature demo finished successfully", "ok")
     finally:
         try:
             env.close()
@@ -983,26 +1137,27 @@ def main() -> int:
             install_frontend_deps()
 
     backend_proc: Optional[subprocess.Popen] = None
+    backend_port: int = args.backend_port
     frontend_proc: Optional[subprocess.Popen] = None
     frontend_port: Optional[int] = None
 
     try:
         if mode in {"full", "stack", "backend", "demo"}:
-            backend_proc = start_backend(args.backend_port)
+            backend_proc, backend_port = start_backend(args.backend_port)
 
         if mode in {"full", "stack"} and not args.no_frontend:
-            frontend_proc = start_frontend(args.frontend_port, args.backend_port)
+            frontend_proc = start_frontend(args.frontend_port, backend_port)
             if frontend_proc:
                 frontend_port = args.frontend_port
 
         if mode == "frontend" and not args.no_frontend:
-            frontend_proc = start_frontend(args.frontend_port, args.backend_port)
+            frontend_proc = start_frontend(args.frontend_port, backend_port)
             if frontend_proc:
                 frontend_port = args.frontend_port
 
         if mode in {"full", "demo"}:
             run_demo(
-                args.backend_port,
+                backend_port,
                 episodes=args.episodes,
                 difficulty=args.difficulty,
                 episode_days=args.episode_days,
@@ -1018,10 +1173,11 @@ def main() -> int:
             return 0
 
         if mode == "demo":
-            ok("Demo finished. Backend will be torn down.")
+            ok("Demo finished. Backend remaining active for inspection.")
+            block_until_interrupt(backend_port, frontend_port)
             return 0
 
-        block_until_interrupt(args.backend_port, frontend_port)
+        block_until_interrupt(backend_port, frontend_port)
         return 0
     finally:
         _terminate_all()

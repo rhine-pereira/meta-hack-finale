@@ -3,11 +3,13 @@ GENESIS MCP Server — The main entry point.
 Exposes tools to LLM agents for co-founding and operating a startup.
 """
 
+import asyncio
 import json
 import os
 import pickle
 import random
 import uuid
+from collections import deque
 from typing import Dict, List, Any
 from datetime import datetime
 from fastmcp import FastMCP
@@ -48,12 +50,61 @@ app.add_middleware(
     expose_headers=["mcp-session-id"],
 )
 
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 async def health(request: Request):
     return JSONResponse({"status": "ok"})
 
 app.router.add_route("/health", health, methods=["GET"])
+
+# ── Demo Event Stream (Judge UI) ──────────────────────────────────────────────
+DEMO_EVENTS = deque(maxlen=500)
+DEMO_UPDATE_EVENT = asyncio.Event()
+
+async def log_demo_event(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+        
+    event = {
+        "id": len(DEMO_EVENTS) + 1,
+        "ts": datetime.now().isoformat(),
+        "phase": data.get("phase"),
+        "phase_title": data.get("phase_title"),
+        "step": data.get("step"),
+        "detail": data.get("detail"),
+        "status": data.get("status", "info"),
+        "data": data.get("data", {})
+    }
+    DEMO_EVENTS.append(event)
+    DEMO_UPDATE_EVENT.set()
+    DEMO_UPDATE_EVENT.clear()
+    return JSONResponse({"status": "ok", "event_id": event["id"]})
+
+async def get_demo_state(request: Request):
+    return JSONResponse({
+        "events": list(DEMO_EVENTS),
+        "current_phase": DEMO_EVENTS[-1]["phase"] if DEMO_EVENTS else 0,
+        "phase_title": DEMO_EVENTS[-1]["phase_title"] if DEMO_EVENTS else None
+    })
+
+async def demo_events(request: Request):
+    async def event_generator():
+        while True:
+            await DEMO_UPDATE_EVENT.wait()
+            if await request.is_disconnected():
+                break
+            
+            if DEMO_EVENTS:
+                latest = DEMO_EVENTS[-1]
+                yield f"data: {json.dumps(latest)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+app.router.add_route("/demo/log", log_demo_event, methods=["POST"])
+app.router.add_route("/demo/state", get_demo_state, methods=["GET"])
+app.router.add_route("/demo/events", demo_events, methods=["GET"])
 
 # Keyed by episode_id (session identifier)
 SESSIONS_FILE = "sessions.pkl"
