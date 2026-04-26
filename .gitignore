@@ -21,6 +21,9 @@ exports/founder_genomes/
 ## Egg info
 *.egg-info/
 
+## LoRA adapter (large model files — upload via HF Hub separately if needed)
+models/
+
 ## OS / editor
 .DS_Store
 Thumbs.db
