@@ -11,6 +11,13 @@ sessions.pkl
 *.pkl
 genesis-checkpoints/
 
+## Frontend build artifacts
+frontend/.next/
+frontend/out/
+
+## Generated exports
+exports/founder_genomes/
+
 ## OS / editor
 .DS_Store
 Thumbs.db

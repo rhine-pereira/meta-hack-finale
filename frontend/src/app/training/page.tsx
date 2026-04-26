@@ -3,11 +3,11 @@
 import React from "react";
 import { useGenesisStore } from "@/lib/store";
 import { MainLayout } from "@/components/layout/MainLayout";
+import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
   BarChart3, 
-  ShowChart, 
   Cpu, 
   Target, 
   Zap, 
@@ -35,8 +35,8 @@ export default function Training() {
       try {
         const client = new GenesisClient();
         const response = await client.callTool("list_founder_genomes", {});
-        if (response.model_ids) {
-          setCompletedModels(response.model_ids);
+        if (response.models) {
+          setCompletedModels(response.models);
         }
       } catch (error) {
         console.error("Failed to fetch genomes:", error);
@@ -46,6 +46,7 @@ export default function Training() {
   }, []);
 
   const data = rewardHistory.map((r, i) => ({ step: i, reward: r }));
+  const currentRewardTotal = currentReward?.total ?? 0;
 
   if (!episodeId && completedModels.length === 0) {
     return (
@@ -77,21 +78,16 @@ export default function Training() {
              <p className="text-text-secondary text-sm">Real-time surveillance of reinforcement learning convergence and model weights.</p>
            </div>
            <div className="flex gap-2">
-              <button className="px-4 py-2 rounded bg-accent/10 border border-accent/30 text-accent font-bold text-xs uppercase tracking-widest hover:bg-accent/20 transition-all flex items-center gap-2">
-                <Cpu size={16} />
-                Export Model
-              </button>
+              <BackToDashboard />
            </div>
         </div>
 
-        {/* ... (rest of the KPIs) */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
            {[
-             { label: "Current Reward", value: currentReward?.toFixed(4) || "0.0000", icon: Zap, color: "text-accent" },
+             { label: "Current Reward", value: currentRewardTotal.toFixed(4), icon: Zap, color: "text-accent" },
              { label: "Steps in Episode", value: data.length.toString(), icon: History, color: "text-text-primary" },
              { label: "Current Level", value: `Lvl ${difficulty || 1}`, icon: ArrowUp, color: "text-signal-green" },
              { label: "Completed Models", value: completedModels.length.toString(), icon: Target, color: "text-signal-green" },
-             { label: "Exploration ε", value: "0.05", icon: Info, color: "text-signal-blue" },
              { label: "Compute Status", value: episodeId ? "ACTIVE" : "IDLE", icon: Activity, color: episodeId ? "text-signal-green" : "text-text-muted" },
            ].map((kpi, i) => (
              <div key={i} className="glass-panel p-4 rounded-xl flex flex-col justify-between h-[110px] relative overflow-hidden group hover:border-accent/40 transition-all">
@@ -145,8 +141,8 @@ export default function Training() {
               </div>
            </div>
 
-           <div className="lg:col-span-4 flex flex-col gap-6">
-              <div className="glass-panel p-6 rounded-xl flex flex-col h-[280px]">
+           <div className="lg:col-span-4 flex flex-col gap-6 h-[600px]">
+              <div className="glass-panel p-6 rounded-xl flex flex-col flex-1">
                  <h3 className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] mb-6 flex items-center gap-2">
                     <div className="w-1.5 h-1.5 rounded-full bg-signal-blue animate-pulse" />
                     Completed Founders
@@ -161,50 +157,33 @@ export default function Training() {
                               <Cpu size={14} className="text-accent" />
                               <div className="text-[11px] font-mono text-text-primary uppercase">{mid}</div>
                            </div>
-                           <div className="text-[9px] text-accent font-black uppercase opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">View Genome</div>
+                           <Link href="/benchmark" className="text-[9px] text-accent font-black uppercase opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">View Genome</Link>
                         </div>
                       ))
                     )}
                  </div>
               </div>
 
-              <div className="glass-panel p-6 rounded-xl flex-1 flex flex-col">
-                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em]">Training Protocol</h3>
-                    <span className="px-2 py-0.5 bg-bg-void border border-border-dim text-[9px] font-mono rounded text-text-secondary uppercase">v.3.0.0</span>
-                 </div>
-                 
-                 <div className="grid grid-cols-2 gap-x-4 gap-y-6 flex-1">
-                    {[
-                       { label: "Type", value: "GRPO / Adaptive" },
-                       { label: "Observation Space", value: "Box(0, 1, (256,))" },
-                       { label: "Reward Engine", value: "11-Component Rubric" },
-                       { label: "Learning Rate", value: "5e-5" },
-                    ].map((item, i) => (
-                       <div key={i}>
-                          <div className="text-[9px] text-text-muted uppercase font-black mb-1">{item.label}</div>
-                          <div className="text-[11px] font-mono text-text-primary">{item.value}</div>
-                       </div>
-                    ))}
-                    
-                    <div className="col-span-2 pt-4 border-t border-border-dim/50">
-                       <div className="flex justify-between text-[9px] font-black text-text-muted uppercase mb-2">
-                          <span>Convergence Velocity</span>
-                          <span className={cn("font-black", episodeId ? "text-signal-green" : "text-text-muted")}>
-                            {episodeId ? "58% STABLE" : "IDLE"}
-                          </span>
-                       </div>
-                       <div className="flex gap-1 h-1.5 w-full bg-bg-void rounded-full overflow-hidden border border-border-dim">
-                          <div className="h-full bg-signal-green" style={{ width: episodeId ? "58%" : "0%" }} />
-                          <div className="h-full bg-signal-red opacity-30" style={{ width: episodeId ? "42%" : "0%" }} />
-                       </div>
+              <div className="glass-panel p-6 rounded-xl flex flex-col gap-4">
+                 <h3 className="text-[10px] font-black text-text-muted uppercase tracking-[0.2em] flex items-center gap-2">
+                    <Info size={14} className="text-accent" />
+                    Training Status
+                 </h3>
+                 <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                       <span className="text-[10px] text-text-muted uppercase font-bold">Session ID</span>
+                       <span className="text-[10px] font-mono text-text-primary truncate ml-4">{episodeId?.slice(0, 12) || "NONE"}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                       <span className="text-[10px] text-text-muted uppercase font-bold">Reward Delta</span>
+                       <span className={cn(
+                          "text-[10px] font-mono font-bold",
+                          rewardHistory.length > 1 && rewardHistory[rewardHistory.length-1] > rewardHistory[rewardHistory.length-2] ? "text-signal-green" : "text-signal-red"
+                       )}>
+                          {rewardHistory.length > 1 ? (rewardHistory[rewardHistory.length-1] - rewardHistory[rewardHistory.length-2]).toFixed(4) : "0.0000"}
+                       </span>
                     </div>
                  </div>
-
-                 <button className="w-full mt-8 py-2.5 bg-accent/10 border border-accent/30 text-accent font-black text-[10px] uppercase tracking-widest rounded hover:bg-accent/20 transition-all flex items-center justify-center gap-2">
-                    <Activity size={14} />
-                    {episodeId ? "Pause Inference" : "Awaiting Client"}
-                 </button>
               </div>
            </div>
         </div>
@@ -216,11 +195,5 @@ export default function Training() {
 const ShowChart = ({ size, className }: { size: number, className?: string }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" />
-  </svg>
-);
-
-const Emergency = ({ size, className }: { size: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="m18 8-4-4-4 4" /><path d="M2 12h20" /><path d="m6 16 4 4 4-4" />
   </svg>
 );

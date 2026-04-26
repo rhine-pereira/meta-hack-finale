@@ -21,7 +21,7 @@ import {
 
 export default function Brain() {
   const { 
-    companyBrain, employees, injectMemory
+    companyBrain, employees, cofounderAlignment, injectMemory
   } = useGenesisStore();
 
   const handleInjectMemory = () => {
@@ -38,6 +38,8 @@ export default function Brain() {
     k.toLowerCase().includes(search.toLowerCase()) || 
     companyBrain[k].toLowerCase().includes(search.toLowerCase())
   );
+
+  const storageUsed = (JSON.stringify(companyBrain).length / 1024).toFixed(1);
 
   return (
     <MainLayout>
@@ -59,12 +61,11 @@ export default function Brain() {
            </div>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-none">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 flex-none">
            {[
              { label: "Total Keys", value: Object.keys(companyBrain).length, icon: Database, color: "text-accent" },
-             { label: "Storage Used", value: `${(JSON.stringify(companyBrain).length / 1024).toFixed(1)} KB`, icon: BrainCircuit, color: "text-signal-purple" },
-             { label: "Sync Status", value: "OPTIMAL", icon: Zap, color: "text-signal-green" },
-             { label: "Access Control", value: "L5-BIO", icon: ShieldCheck, color: "text-signal-blue" },
+             { label: "Storage Used", value: `${storageUsed} KB`, icon: BrainCircuit, color: "text-signal-purple" },
+             { label: "Founder Alignment", value: `${(cofounderAlignment * 100).toFixed(0)}%`, icon: Zap, color: "text-signal-green" },
            ].map((kpi, i) => (
              <div key={i} className="glass-panel p-4 rounded-xl flex items-center gap-4">
                 <div className={cn("p-3 rounded-lg bg-bg-void/50 border border-border-dim", kpi.color)}>

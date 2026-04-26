@@ -2,53 +2,79 @@ export class GenesisClient {
   private baseUrl: string;
   private sessionId: string | null = null;
   private requestId = 0;
+  private initPromise: Promise<void> | null = null;
 
   constructor(baseUrl = process.env.NEXT_PUBLIC_GENESIS_URL || "http://localhost:7860") {
     this.baseUrl = baseUrl;
   }
 
   async initialize(): Promise<void> {
-    try {
-      const res = await fetch(`${this.baseUrl}/mcp`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json, text/event-stream"
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          method: "initialize",
-          params: {
-            protocolVersion: "2024-11-05",
-            capabilities: {},
-            clientInfo: { name: "genesis-ui", version: "1.0.0" }
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = (async () => {
+      try {
+        const res = await fetch(`${this.baseUrl}/mcp`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream"
           },
-          id: this.requestId++
-        })
-      });
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "initialize",
+            params: {
+              protocolVersion: "2024-11-05",
+              capabilities: {},
+              clientInfo: { name: "genesis-ui", version: "1.0.0" }
+            },
+            id: this.requestId++
+          })
+        });
 
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-      this.sessionId = res.headers.get("mcp-session-id");
-      const text = await res.text();
-      const data = this.parseResponse(text);
-      console.log("MCP Initialized:", data);
-    } catch (error) {
-      console.error("Failed to initialize Genesis client:", error);
-      throw error;
-    }
+        this.sessionId = res.headers.get("mcp-session-id");
+        const text = await res.text();
+        const data = this.parseResponse(text);
+        console.log("MCP Initialized:", data);
+
+        // Complete initialization handshake
+        await fetch(`${this.baseUrl}/mcp`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "mcp-session-id": this.sessionId || ""
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/initialized"
+          })
+        });
+      } catch (error) {
+        console.error("Failed to initialize Genesis client:", error);
+        this.initPromise = null;
+        throw error;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   async callTool(name: string, args: Record<string, any> = {}): Promise<any> {
-    if (!this.sessionId) {
-      await this.initialize();
-    }
+    await this.initialize();
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream"
     };
     if (this.sessionId) headers["mcp-session-id"] = this.sessionId;
+
+    // FastMCP can be sensitive to empty arguments for tools that take none
+    const params: any = { name };
+    if (Object.keys(args).length > 0) {
+      params.arguments = args;
+    }
 
     try {
       const res = await fetch(`${this.baseUrl}/mcp`, {
@@ -57,10 +83,11 @@ export class GenesisClient {
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "tools/call",
-          params: { name, arguments: args },
+          params,
           id: this.requestId++
         })
       });
+// ... rest of the function ...
 
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
@@ -77,6 +104,7 @@ export class GenesisClient {
 
   private parseResponse(text: string): any {
     text = text.trim();
+    if (!text) return null;
     if (text.startsWith("{")) {
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error.message || "Unknown MCP error");

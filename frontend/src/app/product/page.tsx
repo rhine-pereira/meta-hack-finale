@@ -21,8 +21,10 @@ import {
 export default function Product() {
   const { 
     productMaturity, techDebt, featuresShipped, uptime, pendingFeatures,
-    buildFeature 
+    buildFeature, runLoadTest, deployToProduction
   } = useGenesisStore();
+
+  const [isLoading, setIsLoading] = React.useState<string | null>(null);
 
   const handleBuildFeature = () => {
     const name = prompt("Feature Name?", "Autonomous Scale Engine");
@@ -30,10 +32,25 @@ export default function Product() {
     buildFeature(name, "medium", 1);
   };
 
+  const handleRunLoadTest = async () => {
+    setIsLoading("load-test");
+    await runLoadTest();
+    setIsLoading(null);
+    alert("Load test completed. Check system logs for details.");
+  };
+
+  const handleDeploy = async () => {
+    if (!confirm(`Deploy v${featuresShipped}.${featuresShipped % 10} to production?`)) return;
+    setIsLoading("deploy");
+    await deployToProduction();
+    setIsLoading(null);
+    alert("Deployment initiated.");
+  };
+
   const statuses = [
     { label: "Pending", items: pendingFeatures.filter(f => f.days_remaining > 0 && f.engineers_assigned === 0) },
     { label: "In Progress", items: pendingFeatures.filter(f => f.engineers_assigned > 0) },
-    { label: "Shipped", items: Array.from({ length: 5 }).map((_, i) => ({ name: `Feature ${featuresShipped - i}`, complexity: "medium" })) } // Mocking history
+    { label: "Shipped", items: [] as any[] } // Removed mock history
   ];
 
   return (
@@ -92,13 +109,21 @@ export default function Product() {
               </div>
 
               <div className="flex flex-col gap-2 mt-auto">
-                 <button className="w-full py-3 bg-accent/10 border border-accent/30 text-accent font-bold text-[10px] uppercase rounded hover:bg-accent/20 transition-all flex items-center justify-center gap-2">
-                    <Activity size={14} />
-                    Run Load Test
+                 <button 
+                    disabled={isLoading !== null}
+                    onClick={handleRunLoadTest}
+                    className="w-full py-3 bg-accent/10 border border-accent/30 text-accent font-bold text-[10px] uppercase rounded hover:bg-accent/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                 >
+                    <Activity size={14} className={isLoading === "load-test" ? "animate-spin" : ""} />
+                    {isLoading === "load-test" ? "Testing..." : "Run Load Test"}
                  </button>
-                 <button className="w-full py-3 bg-signal-blue/10 border border-signal-blue/30 text-signal-blue font-bold text-[10px] uppercase rounded hover:bg-signal-blue/20 transition-all flex items-center justify-center gap-2">
-                    <Rocket size={14} />
-                    Deploy v{featuresShipped}.{featuresShipped % 10}
+                 <button 
+                    disabled={isLoading !== null}
+                    onClick={handleDeploy}
+                    className="w-full py-3 bg-signal-blue/10 border border-signal-blue/30 text-signal-blue font-bold text-[10px] uppercase rounded hover:bg-signal-blue/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                 >
+                    <Rocket size={14} className={isLoading === "deploy" ? "animate-bounce" : ""} />
+                    {isLoading === "deploy" ? "Deploying..." : `Deploy v${featuresShipped}.${featuresShipped % 10}`}
                  </button>
               </div>
            </div>
@@ -117,15 +142,15 @@ export default function Product() {
                        <div key={i} className="flex flex-col gap-4">
                           <div className="flex justify-between items-center text-[10px] text-text-muted font-bold uppercase tracking-widest mb-2 px-1">
                              <span>{col.label}</span>
-                             <span className="bg-bg-void px-2 py-0.5 rounded border border-border-dim">{col.items.length}</span>
+                             <span className="bg-bg-void px-2 py-0.5 rounded border border-border-dim">{col.label === "Shipped" ? featuresShipped : col.items.length}</span>
                           </div>
                           
                           <div className="space-y-3">
-                             {col.items.length === 0 ? (
+                             {col.label === "Shipped" ? (
                                 <div className="p-8 border border-dashed border-border-dim rounded-lg text-center text-text-muted text-[10px] uppercase">
-                                   No items
+                                   {featuresShipped} Features In Production
                                 </div>
-                             ) : (
+                             ) : col.items.length === 0 ? (
                                 col.items.map((item, idx) => (
                                    <motion.div 
                                       key={idx}
@@ -172,22 +197,9 @@ export default function Product() {
                     <History size={14} />
                     Deploy History
                  </h2>
-                 <div className="space-y-3">
-                    <div className="flex items-center gap-4 p-3 rounded bg-bg-void/50 border border-border-dim border-l-2 border-l-signal-green">
-                       <CheckCircle2 size={16} className="text-signal-green" />
-                       <div className="flex-1">
-                          <div className="text-[11px] font-bold text-text-primary">v2.0.4 - System Stability Patch</div>
-                          <div className="text-[9px] text-text-muted uppercase">Successfully deployed 12m ago</div>
-                       </div>
-                       <span className="text-[9px] font-mono text-signal-green bg-signal-green/10 px-1.5 py-0.5 rounded">SUCCESS</span>
-                    </div>
-                    <div className="flex items-center gap-4 p-3 rounded bg-bg-void/50 border border-border-dim border-l-2 border-l-signal-red opacity-70">
-                       <ShieldAlert size={16} className="text-signal-red" />
-                       <div className="flex-1">
-                          <div className="text-[11px] font-bold text-text-primary">v2.0.3 - Auth Layer Rollout</div>
-                          <div className="text-[9px] text-text-muted uppercase">Rolled back 2h ago - High Latency Detected</div>
-                       </div>
-                       <span className="text-[9px] font-mono text-signal-red bg-signal-red/10 px-1.5 py-0.5 rounded">FAILED</span>
+                 <div className="space-y-3 overflow-y-auto max-h-24 custom-scrollbar">
+                    <div className="p-4 border border-dashed border-border-dim rounded-lg text-center text-text-muted text-[10px] uppercase">
+                       Production Stable at v{featuresShipped}.{featuresShipped % 10}
                     </div>
                  </div>
               </div>

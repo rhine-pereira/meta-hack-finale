@@ -84,7 +84,8 @@ interface GenesisStore {
   genomes: Record<string, FounderGenome>;
   genomeExports: Record<string, GenomeExport>;
   comparison: ComparisonExport | null;
-
+  availableModels: string[];
+  
   // Ghost Founder (USP 2 — Human-in-the-Loop Takeover)
   roleControllers: Record<AgentRoleId, RoleController>;
   ghostActiveRole: AgentRoleId | null;       // role whose console is open
@@ -103,14 +104,22 @@ interface GenesisStore {
   // Genome Actions
   exportGenome: (modelId: string) => Promise<GenomeExport>;
   compareGenomes: (modelIds: string[]) => Promise<ComparisonExport>;
+  listFounderGenomes: () => Promise<string[]>;
   
   // New Domain Actions
-  buildFeature: (name: string, complexity: string, engineers: int) => Promise<void>;
-  analyzeMarket: (segment: string) => Promise<void>;
+  buildFeature: (name: string, complexity: string, engineers: number) => Promise<void>;
+  analyzeMarket: (segment: string) => Promise<any>;
   hireCandidate: (candidateId: string, role: string, salary: number) => Promise<void>;
   negotiateWithInvestor: (investorId: string, valuation: number, equity: number) => Promise<void>;
   handleCrisis: (crisisId: string, response: string) => Promise<void>;
   injectMemory: (key: string, value: string) => Promise<void>;
+  runLoadTest: () => Promise<void>;
+  deployToProduction: () => Promise<void>;
+  sendCustomerEmail: (email: string, subject: string, content: string) => Promise<void>;
+  postJobListing: (role: string, requirements: string, salaryRange: string) => Promise<void>;
+  holdOneOnOne: (employeeId: string) => Promise<void>;
+  fireEmployee: (employeeId: string) => Promise<void>;
+  createFinancialModel: (params: any) => Promise<void>;
   
   // Ghost Founder Actions
   takeControl: (role: AgentRoleId) => Promise<void>;
@@ -184,6 +193,7 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
   genomes: {},
   genomeExports: {},
   comparison: null,
+  availableModels: [],
 
   roleControllers: { ceo: "ai", cto: "ai", sales: "ai", people: "ai", cfo: "ai" },
   ghostActiveRole: null,
@@ -386,6 +396,17 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
     }
   },
 
+  listFounderGenomes: async () => {
+    try {
+      const result = await genesisClient.callTool("list_founder_genomes", {});
+      set({ availableModels: result.models || [] });
+      return result.models || [];
+    } catch (error) {
+      console.error("List genomes failed:", error);
+      return [];
+    }
+  },
+
   buildFeature: async (name, complexity, engineers) => {
     const { episodeId } = get();
     if (!episodeId) return;
@@ -405,16 +426,18 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
 
   analyzeMarket: async (segment) => {
     const { episodeId } = get();
-    if (!episodeId) return;
+    if (!episodeId) return null;
     try {
-      await genesisClient.callTool("analyze_market", { 
+      const result = await genesisClient.callTool("analyze_market", { 
         episode_id: episodeId, 
         agent_role: "ceo",
         segment
       });
       await get().fetchState();
+      return result;
     } catch (error) {
       console.error("Analyze market failed:", error);
+      return null;
     }
   },
 
@@ -486,6 +509,113 @@ export const useGenesisStore = create<GenesisStore>((set, get) => ({
       await get().fetchState();
     } catch (error) {
       console.error("Inject memory failed:", error);
+    }
+  },
+
+  runLoadTest: async () => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("run_load_test", { 
+        episode_id: episodeId, 
+        agent_role: "cto" 
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Run load test failed:", error);
+    }
+  },
+
+  deployToProduction: async () => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("deploy_to_production", { 
+        episode_id: episodeId, 
+        agent_role: "cto" 
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Deploy failed:", error);
+    }
+  },
+
+  sendCustomerEmail: async (email, subject, content) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("send_customer_email", { 
+        episode_id: episodeId, 
+        agent_role: "sales",
+        customer_email: email,
+        subject,
+        content
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Send email failed:", error);
+    }
+  },
+
+  postJobListing: async (role, requirements, salaryRange) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("post_job_listing", { 
+        episode_id: episodeId, 
+        agent_role: "people",
+        role,
+        requirements,
+        salary_range: salaryRange
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Post job failed:", error);
+    }
+  },
+
+  holdOneOnOne: async (employeeId) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("hold_one_on_one", { 
+        episode_id: episodeId, 
+        agent_role: "people",
+        employee_id: employeeId
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Hold one-on-one failed:", error);
+    }
+  },
+
+  fireEmployee: async (employeeId) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("fire_employee", { 
+        episode_id: episodeId, 
+        agent_role: "people",
+        employee_id: employeeId
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Fire employee failed:", error);
+    }
+  },
+
+  createFinancialModel: async (params) => {
+    const { episodeId } = get();
+    if (!episodeId) return;
+    try {
+      await genesisClient.callTool("create_financial_model", { 
+        episode_id: episodeId, 
+        agent_role: "cfo",
+        ...params
+      });
+      await get().fetchState();
+    } catch (error) {
+      console.error("Create financial model failed:", error);
     }
   },
 

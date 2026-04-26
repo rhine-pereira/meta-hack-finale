@@ -6,25 +6,37 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { formatCurrency, cn } from "@/lib/utils";
 import { 
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line
-} from "recharts";
-import { motion } from "framer-motion";
-import { TrendingUp, TrendingDown, DollarSign, PieChart, Landmark } from "lucide-react";
+  TrendingUp, 
+  TrendingDown, 
+  DollarSign, 
+  PieChart, 
+  Landmark,
+  Activity
+} from "lucide-react";
 
 export default function Financials() {
   const { 
-    cash, mrr, burnRateDaily, investors, episodeId, runwayDays, negotiateWithInvestor
+    cash, mrr, burnRateDaily, investors, valuation, runwayDays, 
+    negotiateWithInvestor, createFinancialModel
   } = useGenesisStore();
 
-  // Mock data for charts - in real app this would come from store history
-  const chartData = [
-    { day: "D10", cash: 500000, mrr: 0 },
-    { day: "D20", cash: 480000, mrr: 1000 },
-    { day: "D30", cash: 465000, mrr: 2500 },
-    { day: "D40", cash: 452000, mrr: 5000 },
-    { day: "D50", cash: 440000, mrr: 8000 },
-  ];
+  const handleRecalculate = async () => {
+    await createFinancialModel({ 
+      projection_days: 90,
+      include_risk_factors: true
+    });
+    alert("Financial model recalculated based on current state.");
+  };
+
+  const handleNegotiate = async (invId: string, invName: string) => {
+    const offerVal = prompt(`Enter valuation offer for ${invName} (Current: ${formatCurrency(valuation)})`, String(valuation));
+    if (!offerVal) return;
+    const equity = prompt(`Enter equity offer (e.g. 0.1 for 10%)`, "0.1");
+    if (!equity) return;
+
+    await negotiateWithInvestor(invId, Number(offerVal), Number(equity));
+    alert(`Negotiation initiated with ${invName}`);
+  };
 
   return (
     <MainLayout>
@@ -36,7 +48,10 @@ export default function Financials() {
            </div>
            <div className="flex gap-2">
               <BackToDashboard />
-              <button className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors">
+              <button 
+                onClick={handleRecalculate}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-muted transition-colors"
+              >
                 Recalculate Model
               </button>
            </div>
@@ -63,51 +78,25 @@ export default function Financials() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
            <div className="lg:col-span-8 flex flex-col gap-6">
-              <div className="glass-panel p-6 rounded-xl h-[350px] flex flex-col">
-                 <h2 className="text-sm font-bold text-text-primary uppercase mb-6 flex items-center gap-2">
-                    <Activity size={16} className="text-accent" />
-                    Liquidity Vector (90D Projection)
-                 </h2>
-                 <div className="flex-1 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                       <AreaChart data={chartData}>
-                          <defs>
-                             <linearGradient id="colorCash" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#2dd4bf" stopOpacity={0.3}/>
-                                <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0}/>
-                             </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2a" vertical={false} />
-                          <XAxis dataKey="day" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
-                          <YAxis stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v/1000}k`} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: "#0c0c10", borderColor: "#1e1e2a", color: "#e4e4e7" }}
-                            itemStyle={{ color: "#2dd4bf" }}
-                          />
-                          <Area type="monotone" dataKey="cash" stroke="#2dd4bf" fillOpacity={1} fill="url(#colorCash)" />
-                       </AreaChart>
-                    </ResponsiveContainer>
+              <div className="glass-panel p-8 rounded-xl flex-1 flex flex-col justify-center items-center text-center border-dashed border-2 border-border-dim/50">
+                 <div className="p-6 rounded-full bg-accent/5 border border-accent/10 mb-6">
+                    <PieChart size={48} className="text-accent opacity-20" />
                  </div>
-              </div>
-
-              <div className="glass-panel p-6 rounded-xl h-[250px] flex flex-col">
-                 <h2 className="text-sm font-bold text-text-primary uppercase mb-6 flex items-center gap-2">
-                    <TrendingUp size={16} className="text-signal-green" />
-                    Revenue Trajectory
+                 <h2 className="text-lg font-black text-text-primary uppercase mb-2 tracking-tight">
+                    Financial Model Active
                  </h2>
-                 <div className="flex-1 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                       <LineChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e1e2a" vertical={false} />
-                          <XAxis dataKey="day" stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} />
-                          <YAxis stroke="#52525b" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v/1000}k`} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: "#0c0c10", borderColor: "#1e1e2a", color: "#e4e4e7" }}
-                            itemStyle={{ color: "#22c55e" }}
-                          />
-                          <Line type="monotone" dataKey="mrr" stroke="#22c55e" strokeWidth={2} dot={{ r: 4, fill: "#22c55e" }} />
-                       </LineChart>
-                    </ResponsiveContainer>
+                 <p className="text-text-muted text-sm max-w-md mb-8">
+                    Projections are calculated based on current MRR growth vectors and net burn velocity.
+                 </p>
+                 <div className="grid grid-cols-2 gap-8 w-full max-w-lg">
+                    <div className="p-4 rounded-lg bg-bg-void/40 border border-border-dim">
+                       <div className="text-[10px] text-text-muted uppercase font-bold mb-1">Company Valuation</div>
+                       <div className="text-2xl font-mono font-black text-accent">{formatCurrency(valuation)}</div>
+                    </div>
+                    <div className="p-4 rounded-lg bg-bg-void/40 border border-border-dim">
+                       <div className="text-[10px] text-text-muted uppercase font-bold mb-1">Implied ARR</div>
+                       <div className="text-2xl font-mono font-black text-signal-green">{formatCurrency(mrr * 12)}</div>
+                    </div>
                  </div>
               </div>
            </div>
@@ -161,7 +150,7 @@ export default function Financials() {
                              </div>
 
                              <button 
-                               onClick={() => negotiateWithInvestor(inv.id, valuation, 0.1)}
+                               onClick={() => handleNegotiate(inv.id, inv.name)}
                                className="w-full mt-4 py-1.5 rounded border border-border-dim text-[10px] font-bold uppercase text-text-secondary hover:text-accent hover:border-accent/50 transition-all"
                              >
                                Negotiate
@@ -178,8 +167,5 @@ export default function Financials() {
   );
 }
 
-const Activity = ({ size, className }: { size: number, className?: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-  </svg>
-);
+// Removed duplicate Activity SVG
+

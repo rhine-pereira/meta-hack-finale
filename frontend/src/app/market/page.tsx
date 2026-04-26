@@ -20,11 +20,34 @@ import {
 
 export default function Market() {
   const { 
-    customers, competitors, mrr, analyzeMarket
+    customers, competitors, mrr, analyzeMarket, sendCustomerEmail
   } = useGenesisStore();
 
-  const handleAnalyzeMarket = () => {
-    analyzeMarket("Enterprise SaaS");
+  const [marketData, setMarketData] = React.useState<{tam: number, growth: number} | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = React.useState(false);
+
+  const handleAnalyzeMarket = async () => {
+    setIsAnalyzing(true);
+    const result = await analyzeMarket("Enterprise SaaS");
+    if (result) {
+      setMarketData({
+        tam: result.state?.total_tam || 500000000,
+        growth: result.state?.market_growth_rate || 0.142
+      });
+    }
+    setIsAnalyzing(false);
+  };
+
+  const handleEmailCustomer = async () => {
+    const email = prompt("Customer Email?");
+    if (!email) return;
+    const subject = prompt("Subject?");
+    if (!subject) return;
+    const content = prompt("Content?");
+    if (!content) return;
+    
+    await sendCustomerEmail(email, subject, content);
+    alert("Email sent to " + email);
   };
 
   const totalArr = mrr * 12;
@@ -39,22 +62,26 @@ export default function Market() {
            </div>
            <div className="flex gap-2">
               <BackToDashboard />
-              <button className="px-4 py-2 rounded glass-panel text-text-primary border border-border-dim font-bold text-xs uppercase tracking-widest hover:border-accent/50 hover:bg-accent/5 transition-all flex items-center gap-2">
+              <button 
+                onClick={handleEmailCustomer}
+                className="px-4 py-2 rounded glass-panel text-text-primary border border-border-dim font-bold text-xs uppercase tracking-widest hover:border-accent/50 hover:bg-accent/5 transition-all flex items-center gap-2"
+              >
                 <Mail size={16} />
                 Email Customer
               </button>
               <button 
                 onClick={handleAnalyzeMarket}
-                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-glow transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)]"
+                disabled={isAnalyzing}
+                className="px-4 py-2 rounded bg-accent text-bg-void font-bold text-xs uppercase tracking-widest hover:bg-accent-glow transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(45,212,191,0.2)] disabled:opacity-50"
               >
-                <Search size={16} />
-                Analyze Market
+                <Search size={16} className={isAnalyzing ? "animate-spin" : ""} />
+                {isAnalyzing ? "Analyzing..." : "Analyze Market"}
               </button>
            </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-           <div className="lg:col-span-2 glass-panel p-6 rounded-xl relative overflow-hidden group hover:border-accent/30 transition-all">
+           <div className="lg:col-span-3 glass-panel p-6 rounded-xl relative overflow-hidden group hover:border-accent/30 transition-all">
               <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-accent/5 to-transparent pointer-events-none" />
               <div className="flex justify-between items-start mb-6">
                  <div>
@@ -62,32 +89,17 @@ export default function Market() {
                        <PieChart size={14} className="text-accent" />
                        Total Addressable Market (TAM)
                     </div>
-                    <div className="text-4xl font-black text-text-primary tracking-tighter font-mono">$500M</div>
+                    <div className="text-4xl font-black text-text-primary tracking-tighter font-mono">
+                      {marketData ? formatCurrency(marketData.tam) : "$??M"}
+                    </div>
                  </div>
                  <Globe size={40} className="text-accent/10 group-hover:text-accent/20 transition-all duration-500" />
               </div>
               <div className="mt-8 flex items-center justify-between border-t border-border-dim/50 pt-4">
                  <div className="flex items-center gap-2 text-signal-green bg-signal-green/10 px-2 py-1 rounded border border-signal-green/20 text-[11px] font-bold">
-                    <TrendingUp size={14} /> +14.2% YoY Growth
+                    <TrendingUp size={14} /> {marketData ? `+${(marketData.growth * 100).toFixed(1)}%` : "+??%"} YoY Growth
                  </div>
                  <div className="text-[10px] text-text-muted font-mono uppercase">Expansion Vector: Enterprise SaaS</div>
-              </div>
-           </div>
-
-           <div className="grid grid-rows-2 gap-6">
-              <div className="glass-panel p-5 rounded-xl flex flex-col justify-center relative overflow-hidden">
-                 <div className="absolute bottom-0 left-0 w-full h-[2px] bg-border-dim">
-                    <div className="h-full bg-accent" style={{ width: "7.8%" }} />
-                 </div>
-                 <div className="text-[10px] text-text-muted font-bold uppercase tracking-widest mb-1">Market Penetration</div>
-                 <div className="text-2xl font-black text-accent font-mono">7.8%</div>
-              </div>
-              <div className="glass-panel p-5 rounded-xl flex flex-col justify-center relative overflow-hidden">
-                 <div className="absolute bottom-0 left-0 w-full h-[2px] bg-border-dim">
-                    <div className="h-full bg-signal-amber" style={{ width: "42%" }} />
-                 </div>
-                 <div className="text-[10px] text-text-muted font-bold uppercase tracking-widest mb-1">Avg Churn Velocity</div>
-                 <div className="text-2xl font-black text-signal-amber font-mono">1.2% / mo</div>
               </div>
            </div>
         </div>
@@ -153,7 +165,10 @@ export default function Market() {
                                 </span>
                              </td>
                              <td className="py-4 px-6 text-right">
-                                <button className="text-text-muted hover:text-accent transition-colors">
+                                <button 
+                                  onClick={() => alert(`Reviewing account: ${cust.name}`)}
+                                  className="text-text-muted hover:text-accent transition-colors"
+                                >
                                    <ArrowUpRight size={18} />
                                 </button>
                              </td>
