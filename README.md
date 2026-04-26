@@ -6,7 +6,7 @@ colorTo: purple
 sdk: docker
 pinned: true
 app_port: 7860
-short_description: Multi-agent startup simulation with 42 MCP tools and GRPO training
+short_description: Multi-agent startup sim · 42 MCP tools · GRPO
 ---
 
 # GENESIS — The Autonomous Startup Gauntlet
