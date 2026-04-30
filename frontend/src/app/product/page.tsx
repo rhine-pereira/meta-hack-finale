@@ -7,10 +7,8 @@ import { BackToDashboard } from "@/components/navigation/BackToDashboard";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { 
-  Cpu, 
   Rocket, 
   ShieldAlert, 
-  CheckCircle2, 
   Clock, 
   Code2, 
   History, 
@@ -20,7 +18,7 @@ import {
 
 export default function Product() {
   const { 
-    productMaturity, techDebt, featuresShipped, uptime, pendingFeatures,
+    techDebt, featuresShipped, uptime, pendingFeatures,
     buildFeature, runLoadTest, deployToProduction
   } = useGenesisStore();
 
@@ -151,6 +149,10 @@ export default function Product() {
                                    {featuresShipped} Features In Production
                                 </div>
                              ) : col.items.length === 0 ? (
+                                <div className="p-8 border border-dashed border-border-dim rounded-lg text-center text-text-muted text-[10px] uppercase">
+                                  No features here yet
+                                </div>
+                             ) : (
                                 col.items.map((item, idx) => (
                                    <motion.div 
                                       key={idx}

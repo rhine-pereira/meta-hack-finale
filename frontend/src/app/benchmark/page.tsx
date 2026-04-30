@@ -4,6 +4,7 @@ import React from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { ComparisonPanel } from "@/components/dashboard/ComparisonPanel";
 import { GenomePanel } from "@/components/dashboard/GenomePanel";
+import { useGenesisStore } from "@/lib/store";
 import { 
   Trophy, 
   Target, 

@@ -6,6 +6,7 @@ import {
   ShieldAlert, 
   UserCircle, 
   LayoutDashboard, 
+  Award,
   FileText, 
   Users, 
   Briefcase, 
@@ -41,6 +42,7 @@ export const Sidebar = () => {
         { label: "Market Intel", href: "/market", icon: TrendingUp },
         { label: "Founders & Team", href: "/team", icon: Users },
         { label: "Financials", href: "/financials", icon: FileText },
+        { label: "Rewards", href: "/rewards", icon: Award },
         { label: "Resurrection Engine", href: "/postmortem", icon: Skull, color: "text-signal-red" },
       ]
     },
