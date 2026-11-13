@@ -35,6 +35,7 @@ import subprocess
 import sys
 import time
 import uuid
+import zlib
 from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional
 
@@ -159,8 +160,9 @@ parser.add_argument(
 parser.add_argument("--output", type=str, default="./genesis-checkpoints", help="Adapter checkpoint dir.")
 parser.add_argument("--difficulty", type=int, default=1, choices=[1, 2, 3, 4, 5])
 parser.add_argument("--episode-days", type=int, default=20, help="Days simulated per training episode.")
-parser.add_argument("--num-generations", type=int, default=2, help="GRPO completions per prompt (≥2).")
-parser.add_argument("--max-completion-length", type=int, default=160, help="Token budget per completion.")
+parser.add_argument("--num-generations", type=int, default=4, help="GRPO completions per prompt (≥2).")
+parser.add_argument("--max-completion-length", type=int, default=256, help="Token budget per completion.")
+parser.add_argument("--eval-n", type=int, default=30, help="Held-out prompts for the base-vs-trained eval (0 = skip).")
 parser.add_argument("--dataset-multiplier", type=int, default=8, help="Replicate role prompts to size training set.")
 parser.add_argument("--skip-briefing", action="store_true", help="Skip get_daily_briefing inside reward rollouts.")
 parser.add_argument("--fast", action="store_true", help="Aggressive speed profile (Colab T4 friendly).")
@@ -451,20 +453,30 @@ def _close_shared_env() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Tool-call parsing + multi-day rollout
 # ─────────────────────────────────────────────────────────────────────────────
+def _extract_json(text: str) -> Any:
+    """First JSON value in the text (ignores fences/prose around it), or None."""
+    text = text or ""
+    start = text.find("{")
+    if start < 0:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(text[start:])[0]
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _is_valid_call(text: str, role: str) -> bool:
+    parsed = _extract_json(text)
+    return isinstance(parsed, dict) and parsed.get("tool") in ROLE_ALLOWED_TOOLS.get(role, ALLOWED_TOOLS)
+
+
 def _parse_tool_calls(text: str, role: str) -> List[Dict[str, Any]]:
     """Parse model output into tool-call dicts. Tolerates plain text."""
     text = (text or "").strip()
     allowed = ROLE_ALLOWED_TOOLS.get(role, ALLOWED_TOOLS)
 
-    # Try to strip ``` fences if the model wrote them anyway.
-    if text.startswith("```"):
-        text = text.strip("` \n")
-        if text.startswith("json"):
-            text = text[4:].strip()
-
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, ValueError):
+    parsed = _extract_json(text)
+    if parsed is None:
         return [{
             "tool": "make_decision",
             "args": {
@@ -570,7 +582,8 @@ def genesis_reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> L
         prompt_text = _to_text(prompt)
         completion_text = _to_text(completion)
         role = _extract_role(prompt_text)
-        seed = random.randint(0, 2**31 - 1)
+        # Same world for every generation of a prompt, so GRPO compares actions, not luck.
+        seed = zlib.crc32(prompt_text.encode("utf-8"))
 
         try:
             reward_data, weaknesses = run_episode(
@@ -608,13 +621,21 @@ def genesis_reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> L
     return rewards
 
 
+def format_reward_fn(completions: List[Any], prompts: List[Any], **kwargs) -> List[float]:
+    """1.0 for a parseable JSON call to a tool this role may use, else 0.0."""
+    return [
+        float(_is_valid_call(_to_text(c), _extract_role(_to_text(p))))
+        for c, p in zip(completions, prompts)
+    ]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 9. Dataset construction
 # ─────────────────────────────────────────────────────────────────────────────
-def build_dataset(n_samples: int = 200) -> List[Dict[str, Any]]:
+def build_dataset(n_samples: int = 200, seed: int = 42) -> List[Dict[str, Any]]:
     """Synthesize role-aware startup scenarios. Lives entirely in-process."""
     out: List[Dict[str, Any]] = []
-    rng = random.Random(42)
+    rng = random.Random(seed)
 
     for i in range(n_samples):
         role = rng.choice(ROLES)
@@ -830,7 +851,7 @@ def train() -> None:
     dataset = Dataset.from_list(raw).map(format_sample)
     print(f"[data] {len(dataset)} prompts")
 
-    grad_accum = max(1, args.num_generations * (2 if args.fast else 4))
+    grad_accum = max(1, args.num_generations * 2)  # 2 prompts per optimizer step
 
     grpo_args = GRPOConfig(
         output_dir=args.output,
@@ -848,6 +869,7 @@ def train() -> None:
         report_to="none",
         max_prompt_length=1024,
         max_completion_length=args.max_completion_length,
+        reward_weights=[1.0, 0.2],  # env reward dominates; format reward keeps signal alive early
         seed=42,
     )
 
@@ -856,7 +878,7 @@ def train() -> None:
         processing_class=tokenizer,
         args=grpo_args,
         train_dataset=dataset,
-        reward_funcs=genesis_reward_fn,
+        reward_funcs=[genesis_reward_fn, format_reward_fn],
     )
 
     print("\n[train] launching GRPO…")
@@ -872,14 +894,46 @@ def train() -> None:
     # Render training-evidence plot directly so the Colab notebook displays it.
     plot_training_progress()
 
-    # Final post-training rollout for a quick eyeball metric.
-    print("\n[eval] post-training rollout (CEO)…")
-    eval_data, _ = run_episode(
-        role="ceo",
-        action_text='{"tool": "write_company_brain", "args": {"key": "strategy_overview", "value": "Focus on enterprise Series A fundraising while maintaining 18-month runway."}}',
-        seed=999,
-    )
-    print(f"[eval] post-training reward = {float(eval_data.get('reward', 0.0)):.4f}")
+    if args.eval_n > 0:
+        evaluate(model, tokenizer, args.eval_n)
+
+
+def evaluate(model, tokenizer, n: int) -> Dict[str, Any]:
+    """Base vs trained on the same held-out prompts and seeds (greedy decoding)."""
+    import contextlib
+    import torch
+
+    rows = build_dataset(n_samples=n, seed=1234)  # different RNG seed -> unseen scenarios
+    model.config.use_cache = True
+    model.eval()
+    results: Dict[str, Any] = {}
+    for name, ctx in (("base", model.disable_adapter), ("trained", contextlib.nullcontext)):
+        rewards, valid = [], 0
+        with ctx():
+            for i, s in enumerate(rows):
+                prompt = tokenizer.apply_chat_template(s["messages"], tokenize=False, add_generation_prompt=True)
+                ids = tokenizer(prompt, return_tensors="pt").to(model.device)
+                with torch.no_grad():
+                    out = model.generate(**ids, max_new_tokens=args.max_completion_length, do_sample=False)
+                text = tokenizer.decode(out[0][ids["input_ids"].shape[1]:], skip_special_tokens=True)
+                valid += _is_valid_call(text, s["role"])
+                data, _ = run_episode(s["role"], text, seed=1000 + i, difficulty_override=args.difficulty)
+                rewards.append(float(data.get("reward", 0.0)))
+        results[name] = {
+            "mean_reward": round(sum(rewards) / n, 4),
+            "valid_tool_call_rate": round(valid / n, 4),
+        }
+        print(f"[eval] {name:<8} mean_reward={results[name]['mean_reward']:.4f}  "
+              f"valid_tool_calls={results[name]['valid_tool_call_rate']:.0%}")
+
+    b, t = results["base"]["mean_reward"], results["trained"]["mean_reward"]
+    results["relative_reward_gain"] = round((t - b) / b, 4) if b else None
+    results["n_prompts"] = n
+    os.makedirs(args.log_dir, exist_ok=True)
+    with open(os.path.join(args.log_dir, "eval_results.json"), "w") as f:
+        json.dump(results, f, indent=2)
+    print(f"[eval] wrote {os.path.join(args.log_dir, 'eval_results.json')}")
+    return results
 
 
 # ─────────────────────────────────────────────────────────────────────────────

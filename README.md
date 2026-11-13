@@ -278,7 +278,7 @@ python train.py --steps 50
 
 ```bash
 # One-shot: train_colab.py boots the server itself, runs GRPO, plots curves
-python train_colab.py --steps 60 --episode-days 20 --num-generations 2
+python train_colab.py --steps 60 --episode-days 20 --num-generations 4
 ```
 
 ```bash
