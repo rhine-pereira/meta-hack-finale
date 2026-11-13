@@ -867,7 +867,6 @@ def train() -> None:
         bf16=False,
         logging_steps=5 if not args.fast else 10,
         report_to="none",
-        max_prompt_length=1024,
         max_completion_length=args.max_completion_length,
         reward_weights=[1.0, 0.2],  # env reward dominates; format reward keeps signal alive early
         seed=42,
