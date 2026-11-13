@@ -938,12 +938,12 @@ def evaluate(model, tokenizer, n: int) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # 13. Server lifecycle
 # ─────────────────────────────────────────────────────────────────────────────
-def _wait_for_server(url: str = "http://127.0.0.1:7860", max_s: int = 30) -> bool:
+def _wait_for_server(url: str = "http://127.0.0.1:7860", max_s: int = 90) -> bool:
     import requests
     for _ in range(max_s):
         try:
-            r = requests.get(f"{url}/mcp", timeout=2)
-            if r.status_code in (200, 405, 406):
+            # /health, not /mcp: newer FastMCP answers GET /mcp with 400.
+            if requests.get(f"{url}/health", timeout=2).status_code == 200:
                 return True
         except requests.exceptions.RequestException:
             pass
@@ -991,7 +991,7 @@ if __name__ == "__main__":
                     print("\n--- server startup log ---\n" + tail + "\n--- end ---")
                 except Exception:
                     pass
-            raise RuntimeError("GENESIS server did not become ready within 30 s.")
+            raise RuntimeError("GENESIS server did not become ready within 90 s (see /tmp/genesis_server.log).")
         print("[server] ready.")
 
         if args.smoke:
