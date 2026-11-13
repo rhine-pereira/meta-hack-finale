@@ -860,7 +860,7 @@ def train() -> None:
         per_device_train_batch_size=1,
         gradient_accumulation_steps=grad_accum,
         learning_rate=5e-5,
-        warmup_ratio=0.05,
+        warmup_steps=max(1, round(0.05 * args.steps)),  # int works on all versions; warmup_ratio was removed in transformers 5.x
         lr_scheduler_type="cosine",
         optim="adamw_8bit",
         fp16=False,
